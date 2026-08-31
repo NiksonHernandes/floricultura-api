@@ -1,0 +1,21 @@
+# Profile dev (SPEC-M0 §3.3). Credenciais vem de env vars exportadas no ambiente/IDE (ver .env.example).
+spring:
+  jpa:
+    show-sql: true
+  flyway:
+    clean-disabled: true
+
+# Detalhes de health expostos apenas em dev (SPEC-M0 §3.3).
+management:
+  endpoint:
+    health:
+      show-details: always
+
+# Origem permitida de CORS em dev (SPEC-M0 §3.4). Consumido pelo CorsConfig em T-M0-2.
+app:
+  cors:
+    allowed-origins: http://localhost:4200
+
+logging:
+  level:
+    org.springframework.security: INFO
