@@ -1,0 +1,19 @@
+# Profile prod (SPEC-M0 §3.3, §9). Tudo sensivel vem de env vars/secrets do host — nada versionado.
+spring:
+  jpa:
+    show-sql: false
+
+# Sem detalhes de health em prod (nao vazar infra).
+management:
+  endpoint:
+    health:
+      show-details: never
+
+# Origens de CORS de prod via env var (multiplas separadas por virgula) — SPEC-M0 §3.4.
+app:
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:}
+
+logging:
+  level:
+    root: INFO
