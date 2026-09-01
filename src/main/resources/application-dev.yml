@@ -3,6 +3,9 @@ spring:
   jpa:
     show-sql: true
   flyway:
+    # dev carrega migracoes comuns + o seed dev-only (AD-SQ-23). A lista SUBSTITUI (nao mescla) a de
+    # application.yml, entao os dois locations precisam ser listados. Prod NAO tem db/migration-dev.
+    locations: classpath:db/migration,classpath:db/migration-dev
     clean-disabled: true
 
 # Detalhes de health expostos apenas em dev (SPEC-M0 §3.3).

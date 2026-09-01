@@ -116,8 +116,9 @@ public class UsuarioService {
 
     /**
      * Reset de senha pelo ADMIN (CA-11). Inexistente → {@link UsuarioNaoEncontradoException} (404).
-     * Grava a nova senha como BCrypt e marca {@code senha_provisoria=true}, forcando a troca no proximo
-     * login do alvo (§4). A senha em texto nunca e logada nem persistida (§9) — so vira
+     * Grava a nova senha como BCrypt e marca {@code senha_provisoria=false} — o reset <b>nao</b> forca
+     * troca no proximo login (fim da troca forcada PARA TODOS, SPEC-M1.1 §3.1/AD-SQ-24; a coluna e
+     * mantida apenas informativa). A senha em texto nunca e logada nem persistida (§9) — so vira
      * {@code PasswordEncoder.encode}. Contrato responde 204 sem corpo.
      */
     @Transactional
@@ -125,7 +126,7 @@ public class UsuarioService {
         Usuario usuario = usuarioRepository.findById(id)
                 .orElseThrow(UsuarioNaoEncontradoException::new);
         usuario.setSenhaHash(passwordEncoder.encode(novaSenha));
-        usuario.setSenhaProvisoria(true);
+        usuario.setSenhaProvisoria(false); // AD-SQ-24: reset nao forca troca (flag so informativa)
         usuarioRepository.save(usuario);
     }
 }
