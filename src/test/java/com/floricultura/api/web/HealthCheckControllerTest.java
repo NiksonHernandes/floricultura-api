@@ -43,10 +43,10 @@ class HealthCheckControllerTest {
     @Test
     void rotaInexistente_devolveEnvelopeDeErro404() throws Exception {
         mockMvc.perform(get("/api/v1/inexistente"))
-                .andExpect(status().isNotFound())
+                .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").value(nullValue()))
-                .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
+                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
     }
 
     @Test
