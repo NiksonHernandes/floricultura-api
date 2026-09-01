@@ -32,6 +32,9 @@ public class UsuarioService {
     /** Papel fixo na criacao via API (decisao do dono, 2026-09-01 — §3.2/AD-SQ-19): nunca cria ADMIN. */
     private static final String ROLE_CRIACAO = "USER";
 
+    /** Papel administrativo — alvo da protecao do ultimo-admin (§4/CA-9) e do RBAC {@code ROLE_ADMIN}. */
+    private static final String ROLE_ADMIN = "ADMIN";
+
     private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
 
@@ -83,5 +86,46 @@ public class UsuarioService {
         return usuarioRepository.findById(id)
                 .map(UsuarioResponse::de)
                 .orElseThrow(UsuarioNaoEncontradoException::new);
+    }
+
+    /**
+     * Ativa/desativa um usuario (CA-9). Inexistente → {@link UsuarioNaoEncontradoException} (404).
+     *
+     * <p><b>Protecao do ultimo ADMIN (§4/AD-SQ-19):</b> ao desativar ({@code ativo=false}) um alvo
+     * {@code role='ADMIN'}, a contagem de ADMINs ativos e lida <b>antes</b> de persistir; se for a
+     * unica ({@code == 1}) → {@link UltimoAdminException} (409), sem alterar o estado. Cobre o caso do
+     * proprio ADMIN autenticado tentando se autodesativar (a contagem inclui a si mesmo). Tudo dentro
+     * de uma transacao para consistencia da leitura+escrita.
+     *
+     * <p>{@code atualizado_em} nao avanca (coluna {@code updatable=false} sem trigger — T-M1-1); o
+     * contrato §3.2 devolve {@link UsuarioResponse}, que nao carrega {@code atualizadoEm}, entao nao e
+     * requisito. Devolve o response atualizado (sem {@code senha_hash} — §9).
+     */
+    @Transactional
+    public UsuarioResponse alterarStatus(Long id, boolean ativo) {
+        Usuario usuario = usuarioRepository.findById(id)
+                .orElseThrow(UsuarioNaoEncontradoException::new);
+        if (!ativo
+                && ROLE_ADMIN.equals(usuario.getRole())
+                && usuarioRepository.countByRoleAndAtivoTrue(ROLE_ADMIN) == 1) {
+            throw new UltimoAdminException();
+        }
+        usuario.setAtivo(ativo);
+        return UsuarioResponse.de(usuarioRepository.save(usuario));
+    }
+
+    /**
+     * Reset de senha pelo ADMIN (CA-11). Inexistente → {@link UsuarioNaoEncontradoException} (404).
+     * Grava a nova senha como BCrypt e marca {@code senha_provisoria=true}, forcando a troca no proximo
+     * login do alvo (§4). A senha em texto nunca e logada nem persistida (§9) — so vira
+     * {@code PasswordEncoder.encode}. Contrato responde 204 sem corpo.
+     */
+    @Transactional
+    public void redefinirSenha(Long id, String novaSenha) {
+        Usuario usuario = usuarioRepository.findById(id)
+                .orElseThrow(UsuarioNaoEncontradoException::new);
+        usuario.setSenhaHash(passwordEncoder.encode(novaSenha));
+        usuario.setSenhaProvisoria(true);
+        usuarioRepository.save(usuario);
     }
 }
