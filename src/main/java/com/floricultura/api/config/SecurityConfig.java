@@ -2,23 +2,31 @@ package com.floricultura.api.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 
 /**
- * Baseline de seguranca do M0 (AD-SQ-6, aprovada no gate). {@code SecurityFilterChain}
- * <b>permissivo</b> ({@code permitAll}) para o scaffold: sem o permitAll, o starter-security
- * bloquearia o health com a senha padrao gerada (401) e CA-2/CA-4 falhariam.
+ * Seguranca endurecida do M1 (SPEC-M1 §3.4 — substitui o {@code permitAll} do scaffold M0). A
+ * autenticacao passa a ser exigida em runtime: o {@link JwtAuthenticationFilter} valida o Bearer JWT
+ * e popula o {@code SecurityContext}; o RBAC ({@code hasRole("ADMIN")}) protege {@code /usuarios/**}.
  *
- * <p>CSRF off (API stateless), CORS on (referenciando o {@code CorsConfigurationSource} dentro do
- * chain — §12), sessao STATELESS, {@code httpBasic}/{@code formLogin} desabilitados. O
- * {@code PasswordEncoder} (BCrypt) fica declarado para uso no M1 (login/JWT). Autorizacao por role
- * em runtime = M1.
+ * <p><b>Rotas publicas (§3.4):</b> {@code POST /api/v1/auth/login}, {@code GET /api/v1/health-check},
+ * {@code /actuator/health}, {@code /actuator/info} e as rotas do Swagger. <b>Resto de {@code /api/v1}
+ * autenticado</b> — inclui rota inexistente sem token → 401 (AD-SQ-21; o 404 com token valido e
+ * coberto no {@code AuthSecurityTest}).
+ *
+ * <p>Mantem do M0: CSRF off, CORS on (o {@code CorsFilter} entra ANTES da autorizacao, entao o
+ * preflight {@code OPTIONS} e respondido sem exigir auth — §12/CA-M0-5), sessao STATELESS,
+ * {@code httpBasic}/{@code formLogin} off, {@code PasswordEncoder} (BCrypt). Os handlers de erro
+ * ({@link RestAuthenticationEntryPoint} 401 / {@link RestAccessDeniedHandler} 403) escrevem o
+ * envelope §3.1.
  */
 @Configuration
 @EnableWebSecurity
@@ -26,15 +34,27 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(
-            HttpSecurity http, CorsConfigurationSource corsConfigurationSource) throws Exception {
+            HttpSecurity http,
+            CorsConfigurationSource corsConfigurationSource,
+            JwtAuthenticationFilter jwtAuthenticationFilter,
+            RestAuthenticationEntryPoint authenticationEntryPoint,
+            RestAccessDeniedHandler accessDeniedHandler) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/**").permitAll()
-                        .requestMatchers("/actuator/**").permitAll()
-                        .anyRequest().permitAll())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/health-check").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers(
+                                "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+                        .requestMatchers("/api/v1/usuarios/**").hasRole("ADMIN")
+                        .anyRequest().authenticated())
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler))
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .httpBasic(httpBasic -> httpBasic.disable())
                 .formLogin(formLogin -> formLogin.disable());
         return http.build();

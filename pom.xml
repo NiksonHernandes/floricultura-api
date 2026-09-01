@@ -46,6 +46,14 @@
 			<artifactId>spring-boot-starter-security</artifactId>
 		</dependency>
 
+		<!-- JWT (HS256) via Nimbus (SPEC-M1 §3.3): NimbusJwtEncoder/Decoder + ImmutableSecret.
+		     Gerenciada pelo BOM spring-boot-dependencies:4.1.1 (Spring Security 7) — SEM pin manual
+		     (AD-SQ-13). Traz nimbus-jose-jwt transitivo, tambem BOM-managed. -->
+		<dependency>
+			<groupId>org.springframework.security</groupId>
+			<artifactId>spring-security-oauth2-jose</artifactId>
+		</dependency>
+
 		<!-- Actuator (health, info) -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -118,6 +126,20 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+			<!-- Segredo JWT test-only (NAO e credencial real; >= 32 bytes so para o HS256) injetado
+			     APENAS no JVM de teste (SPEC-M1 §9/§3.3 · B1(a) do gate T-M1-2). Mantem os smokes do
+			     M0 (contextLoads/HealthCheck) verdes quando o SecurityConfig passar a exigir o
+			     JwtService, SEM tocar em teste do M0. NAO afeta `spring-boot:run`: o fail-fast por
+			     APP_JWT_SECRET ausente segue valendo em dev/prod (config so de teste). -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<environmentVariables>
+						<APP_JWT_SECRET>test-only-nao-segredo-surefire-0123456789abcdef</APP_JWT_SECRET>
+					</environmentVariables>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>
