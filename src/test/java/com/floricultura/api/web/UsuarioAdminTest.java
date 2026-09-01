@@ -90,7 +90,7 @@ class UsuarioAdminTest {
     // ---- CA-7: criar --------------------------------------------------------------------------
 
     @Test
-    void criar_comPayloadValido_devolve201SemHashRoleUserEProvisoria() throws Exception {
+    void criar_comPayloadValido_devolve201SemHashRoleUserEProvisoriaFalse() throws Exception {
         mockMvc.perform(post("/api/v1/usuarios")
                         .header(HttpHeaders.AUTHORIZATION, adminBearer)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -102,7 +102,7 @@ class UsuarioAdminTest {
                 .andExpect(jsonPath("$.data.email").value("maria@floricultura.local"))
                 .andExpect(jsonPath("$.data.role").value("USER")) // API sempre cria USER (§3.2/AD-SQ-19)
                 .andExpect(jsonPath("$.data.ativo").value(true))
-                .andExpect(jsonPath("$.data.senhaProvisoria").value(true)) // criacao por ADMIN (§4)
+                .andExpect(jsonPath("$.data.senhaProvisoria").value(false)) // AD-SQ-24: criacao NAO forca troca
                 .andExpect(jsonPath("$.data.criadoEm").isNotEmpty()) // vem do DEFAULT now() do banco
                 // §9/CA-7: nunca expor senha_hash/senha no corpo.
                 .andExpect(jsonPath("$.data.senhaHash").doesNotExist())
@@ -287,7 +287,7 @@ class UsuarioAdminTest {
     // ---- CA-11: reset de senha pelo ADMIN -----------------------------------------------------
 
     @Test
-    void redefinirSenha_devolve204EMarcaProvisoria() throws Exception {
+    void redefinirSenha_devolve204ENaoForcaProvisoria() throws Exception {
         // Alvo comeca com senha_provisoria=false e um hash conhecido, para provar a mudanca.
         String hashAntigo = ENCODER.encode("senhaAntiga1");
         Long id = jdbc.queryForObject(
@@ -303,7 +303,7 @@ class UsuarioAdminTest {
 
         Boolean provisoria = jdbc.queryForObject(
                 "SELECT senha_provisoria FROM usuario WHERE id = ?", Boolean.class, id);
-        assertThat(provisoria).isTrue(); // CA-11: forca troca no proximo login
+        assertThat(provisoria).isFalse(); // AD-SQ-24: reset NAO forca troca (flag so informativa)
 
         // O hash foi de fato reescrito como BCrypt da nova senha (nunca a senha antiga/texto — §9).
         String hashNovo = jdbc.queryForObject(

@@ -7,7 +7,8 @@ package com.floricultura.api.domain;
  * handoff: "nao toque a entity").
  *
  * <p>Centraliza os invariantes de "novo usuario criado pelo ADMIN": nasce {@code ativo=true} e
- * {@code senha_provisoria=true} (forca troca no 1o login — §4/CA-11, consistente com o seed). O
+ * {@code senha_provisoria=false} — a troca no 1o acesso deixou de ser forcada PARA TODOS (SPEC-M1.1
+ * §3.1/AD-SQ-24); a coluna e mantida apenas informativa. O
  * {@code senha_hash} ja chega BCrypt-encoded do servico (§9 — a fabrica nunca ve a senha em texto).
  * {@code criado_em}/{@code atualizado_em} nao sao setados aqui: vem do {@code DEFAULT now()} do banco
  * (colunas {@code insertable=false}).
@@ -19,7 +20,7 @@ public final class UsuarioFactory {
     }
 
     /**
-     * Cria um usuario ativo com senha provisoria (criacao por ADMIN — §3.2/CA-7).
+     * Cria um usuario ativo, sem forcar troca de senha (criacao por ADMIN — §3.2; SPEC-M1.1 §3.1).
      *
      * @param nome      nome de exibicao (ja validado pelo DTO)
      * @param email     e-mail unico (ja validado; unicidade checada no servico)
@@ -34,7 +35,7 @@ public final class UsuarioFactory {
         usuario.setSenhaHash(senhaHash);
         usuario.setRole(role);
         usuario.setAtivo(true);
-        usuario.setSenhaProvisoria(true);
+        usuario.setSenhaProvisoria(false); // AD-SQ-24: 1o acesso nao forca troca (flag so informativa)
         return usuario;
     }
 }
