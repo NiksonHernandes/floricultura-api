@@ -29,7 +29,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class UsuarioService {
 
-    private static final String ROLE_PADRAO = "USER";
+    /** Papel fixo na criacao via API (decisao do dono, 2026-09-01 — §3.2/AD-SQ-19): nunca cria ADMIN. */
+    private static final String ROLE_CRIACAO = "USER";
 
     private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
@@ -43,8 +44,9 @@ public class UsuarioService {
     /**
      * Cria um usuario (CA-7). Checa unicidade de e-mail <b>antes</b> do insert →
      * {@link EmailJaCadastradoException} (409 amigavel); grava {@code senha_hash} BCrypt; {@code role}
-     * default {@code USER} se omitido; {@code ativo=true} e {@code senha_provisoria=true} (§4). Devolve
-     * {@link UsuarioResponse} sem {@code senha_hash}.
+     * <b>sempre {@code USER}</b> (decisao do dono, 2026-09-01 — §3.2/AD-SQ-19: a API nunca cria ADMIN);
+     * {@code ativo=true} e {@code senha_provisoria=true} (§4). Devolve {@link UsuarioResponse} sem
+     * {@code senha_hash}.
      *
      * <p><b>Sem {@code @Transactional} aqui de proposito:</b> como {@code open-in-view=false}, o
      * {@code save} e a releitura correm em contextos de persistencia distintos, e so a releitura traz
@@ -60,7 +62,7 @@ public class UsuarioService {
                 req.nome(),
                 req.email(),
                 passwordEncoder.encode(req.senha()),
-                roleOuPadrao(req.role()));
+                ROLE_CRIACAO);
         Long id = usuarioRepository.save(usuario).getId();
         return usuarioRepository.findById(id)
                 .map(UsuarioResponse::de)
@@ -81,10 +83,5 @@ public class UsuarioService {
         return usuarioRepository.findById(id)
                 .map(UsuarioResponse::de)
                 .orElseThrow(UsuarioNaoEncontradoException::new);
-    }
-
-    /** {@code role} omitido/vazio → default {@code USER} (§3.2); valores validos garantidos pelo DTO. */
-    private static String roleOuPadrao(String role) {
-        return (role == null || role.isBlank()) ? ROLE_PADRAO : role;
     }
 }

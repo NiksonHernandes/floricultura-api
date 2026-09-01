@@ -89,7 +89,7 @@ class UsuarioAdminTest {
     // ---- CA-7: criar --------------------------------------------------------------------------
 
     @Test
-    void criar_comPayloadValido_devolve201SemHashRoleDefaultUserEProvisoria() throws Exception {
+    void criar_comPayloadValido_devolve201SemHashRoleUserEProvisoria() throws Exception {
         mockMvc.perform(post("/api/v1/usuarios")
                         .header(HttpHeaders.AUTHORIZATION, adminBearer)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -99,7 +99,7 @@ class UsuarioAdminTest {
                 .andExpect(jsonPath("$.data.id").isNumber())
                 .andExpect(jsonPath("$.data.nome").value("Maria Silva"))
                 .andExpect(jsonPath("$.data.email").value("maria@floricultura.local"))
-                .andExpect(jsonPath("$.data.role").value("USER")) // default quando omitido (§3.2)
+                .andExpect(jsonPath("$.data.role").value("USER")) // API sempre cria USER (§3.2/AD-SQ-19)
                 .andExpect(jsonPath("$.data.ativo").value(true))
                 .andExpect(jsonPath("$.data.senhaProvisoria").value(true)) // criacao por ADMIN (§4)
                 .andExpect(jsonPath("$.data.criadoEm").isNotEmpty()) // vem do DEFAULT now() do banco
@@ -108,14 +108,27 @@ class UsuarioAdminTest {
                 .andExpect(jsonPath("$.data.senha").doesNotExist());
     }
 
+    /**
+     * Regra do dono (2026-09-01 — §3.2/AD-SQ-19): a API <b>nunca</b> cria ADMIN. Um {@code role:"ADMIN"}
+     * no payload e ignorado (campo inexistente no DTO) → nasce {@code USER}. Prova via resposta e via
+     * banco (nenhum ADMIN alem do seed permanece).
+     */
     @Test
-    void criar_comRoleAdmin_persisteRoleInformada() throws Exception {
+    void criar_comRoleAdminNoPayload_eIgnorado_criaUser() throws Exception {
         mockMvc.perform(post("/api/v1/usuarios")
                         .header(HttpHeaders.AUTHORIZATION, adminBearer)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(criarBody("Joao Chefe", "joao@floricultura.local", "senhaForte1", "ADMIN")))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.role").value("ADMIN"));
+                .andExpect(jsonPath("$.data.role").value("USER"));
+
+        // No banco, o unico ADMIN continua sendo o seed do @BeforeEach — o novo usuario e USER.
+        Long admins = jdbc.queryForObject(
+                "SELECT count(*) FROM usuario WHERE role = 'ADMIN'", Long.class);
+        assertThat(admins).isEqualTo(1L);
+        String roleJoao = jdbc.queryForObject(
+                "SELECT role FROM usuario WHERE email = ?", String.class, "joao@floricultura.local");
+        assertThat(roleJoao).isEqualTo("USER");
     }
 
     @Test

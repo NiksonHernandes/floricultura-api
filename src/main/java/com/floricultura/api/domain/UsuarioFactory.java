@@ -24,7 +24,7 @@ public final class UsuarioFactory {
      * @param nome      nome de exibicao (ja validado pelo DTO)
      * @param email     e-mail unico (ja validado; unicidade checada no servico)
      * @param senhaHash hash BCrypt da senha (nunca a senha em texto — §9)
-     * @param role      papel {@code ADMIN}/{@code USER} (default resolvido no servico)
+     * @param role      papel a gravar (o servico de criacao sempre passa {@code USER} — §3.2/AD-SQ-19)
      * @return entidade transiente pronta para {@code save}
      */
     public static Usuario novo(String nome, String email, String senhaHash, String role) {
