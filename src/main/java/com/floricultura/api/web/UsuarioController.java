@@ -1,5 +1,6 @@
 package com.floricultura.api.web;
 
+import com.floricultura.api.config.OpenApiConfig;
 import com.floricultura.api.service.EmailJaCadastradoException;
 import com.floricultura.api.service.UltimoAdminException;
 import com.floricultura.api.service.UsuarioNaoEncontradoException;
@@ -11,6 +12,9 @@ import com.floricultura.api.web.dto.UsuarioResponse;
 import com.floricultura.api.web.error.ErrorCode;
 import com.floricultura.api.web.response.ApiError;
 import com.floricultura.api.web.response.ApiResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -48,6 +52,9 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/v1/usuarios")
+@Tag(name = "usuarios", description = "Gestao de usuarios (ADMIN): criar, listar, detalhar, "
+        + "ativar/desativar e reset de senha")
+@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 public class UsuarioController {
 
     private final UsuarioService usuarioService;
@@ -57,6 +64,7 @@ public class UsuarioController {
     }
 
     /** CA-7: cria usuario → 201 com {@link UsuarioResponse} (sem {@code senha_hash}). */
+    @Operation(summary = "Cria usuario (role fixa USER) → 201")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<UsuarioResponse> criar(
@@ -65,12 +73,14 @@ public class UsuarioController {
     }
 
     /** CA-8: lista usuarios (ordenada por {@code nome}), nenhum campo de senha exposto. */
+    @Operation(summary = "Lista usuarios (ordenada por nome)")
     @GetMapping
     public ApiResponse<List<UsuarioResponse>> listar(HttpServletRequest http) {
         return ApiResponse.ok(usuarioService.listar(), http.getRequestURI());
     }
 
     /** CA-8: detalha usuario por id; inexistente → 404. */
+    @Operation(summary = "Detalha usuario por id (404 se inexistente)")
     @GetMapping("/{id}")
     public ApiResponse<UsuarioResponse> detalhar(
             @PathVariable Long id, HttpServletRequest http) {
@@ -81,6 +91,7 @@ public class UsuarioController {
      * CA-9: ativa/desativa usuario → 200 com {@link UsuarioResponse} atualizado. Desativar o unico
      * ADMIN ativo → 409 (handler local); inexistente → 404.
      */
+    @Operation(summary = "Ativa/desativa usuario (409 no ultimo ADMIN ativo; 404 se inexistente)")
     @PatchMapping("/{id}/status")
     public ApiResponse<UsuarioResponse> alterarStatus(
             @PathVariable Long id,
@@ -94,6 +105,7 @@ public class UsuarioController {
      * CA-11: reset de senha pelo ADMIN → 204 sem corpo. Efeito: {@code senha_hash} BCrypt do alvo e
      * {@code senha_provisoria=true}. Inexistente → 404. Nada de senha em log/resposta (§9).
      */
+    @Operation(summary = "Reset de senha pelo ADMIN → forca troca no proximo login (204)")
     @PatchMapping("/{id}/senha")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void redefinirSenha(

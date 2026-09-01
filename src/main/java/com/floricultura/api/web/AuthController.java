@@ -1,5 +1,6 @@
 package com.floricultura.api.web;
 
+import com.floricultura.api.config.OpenApiConfig;
 import com.floricultura.api.service.AuthService;
 import com.floricultura.api.service.CredenciaisInvalidasException;
 import com.floricultura.api.service.SenhaAtualIncorretaException;
@@ -11,6 +12,9 @@ import com.floricultura.api.web.error.ErrorCode;
 import com.floricultura.api.web.response.ApiError;
 import com.floricultura.api.web.response.ApiResponse;
 import com.floricultura.api.web.response.FieldErrorItem;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -44,6 +48,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/v1/auth")
+@Tag(name = "auth", description = "Autenticacao (login JWT), perfil e troca da propria senha")
 public class AuthController {
 
     private final AuthService authService;
@@ -52,7 +57,8 @@ public class AuthController {
         this.authService = authService;
     }
 
-    /** CA-1: login OK → 200 com token + sessao (sem {@code senha_hash}). */
+    /** CA-1: login OK → 200 com token + sessao (sem {@code senha_hash}). Rota publica (sem Bearer). */
+    @Operation(summary = "Autentica por e-mail + senha e emite um JWT (publico)")
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(
             @Valid @RequestBody LoginRequest request, HttpServletRequest http) {
@@ -60,6 +66,8 @@ public class AuthController {
     }
 
     /** CA-4: perfil do autenticado (id vem do principal populado pelo filtro JWT). */
+    @Operation(summary = "Perfil do usuario autenticado")
+    @SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
     @GetMapping("/me")
     public ApiResponse<MeResponse> me(
             @AuthenticationPrincipal Long usuarioId, HttpServletRequest http) {
@@ -67,6 +75,8 @@ public class AuthController {
     }
 
     /** CA-10: troca da propria senha → 204 sem corpo. */
+    @Operation(summary = "Troca a propria senha (zera a flag de senha provisoria)")
+    @SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
     @PatchMapping("/senha")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void trocarSenha(

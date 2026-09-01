@@ -60,6 +60,18 @@
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
 
+		<!-- Swagger/OpenAPI (SPEC-M1 §2/CA-15/AD-SQ-20). springdoc NAO e gerenciado pelo BOM do
+		     Boot (§12) => versao PINADA explicitamente. Verificado no code-time: a linha 3.x e a
+		     que mira Spring Boot 4 / Spring Framework 7 — o POM da 3.1.0 (release estavel, nao
+		     RC/M) herda de spring-boot-starter-parent:4.1.0 e usa os modulos granulares do Boot 4
+		     (spring-boot-tomcat, spring-boot-starter-webmvc-test, spring-boot-health). As linhas
+		     2.x miram Boot 3.x e sao INCOMPATIVEIS. Compativel com nosso Boot 4.1.1. -->
+		<dependency>
+			<groupId>org.springdoc</groupId>
+			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+			<version>3.1.0</version>
+		</dependency>
+
 		<!-- Migracoes versionadas (AD-SQ-3). Desde Flyway 10 o suporte a PostgreSQL e um modulo
 		     separado (AD-SQ-13). No Boot 4 a auto-configuracao do Flyway saiu para o modulo
 		     spring-boot-flyway (antes vinha em spring-boot-autoconfigure); sem ele o Flyway NAO
