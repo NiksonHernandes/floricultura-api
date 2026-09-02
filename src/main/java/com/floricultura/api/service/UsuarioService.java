@@ -4,9 +4,12 @@ import com.floricultura.api.domain.Usuario;
 import com.floricultura.api.domain.UsuarioFactory;
 import com.floricultura.api.repository.UsuarioRepository;
 import com.floricultura.api.web.dto.CriarUsuarioRequest;
+import com.floricultura.api.web.dto.PaginaResponse;
+import com.floricultura.api.web.dto.PaginacaoParams;
 import com.floricultura.api.web.dto.UsuarioResponse;
-import java.util.List;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -34,6 +37,9 @@ public class UsuarioService {
 
     /** Papel administrativo — alvo da protecao do ultimo-admin (§4/CA-9) e do RBAC {@code ROLE_ADMIN}. */
     private static final String ROLE_ADMIN = "ADMIN";
+
+    /** Ordenacao MVP da lista de usuarios (§3.3/AD-SQ-29): {@code nome ASC} — mesmo do ProdutoService. */
+    private static final Sort ORDENACAO_PADRAO = Sort.by(Sort.Direction.ASC, "nome");
 
     private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
@@ -72,12 +78,20 @@ public class UsuarioService {
                 .orElseThrow(UsuarioNaoEncontradoException::new);
     }
 
-    /** Lista todos os usuarios ordenados por {@code nome} (CA-8), sem vazar {@code senha_hash} (§9). */
+    /**
+     * Lista usuarios paginados (retrofit M2 — CA-21/AD-SQ-29), ordenados por {@code nome ASC}, com
+     * filtro opcional {@code ILIKE '%nome%'} (case-insensitive, substring). {@code nome} vazio/em
+     * branco = sem filtro. Parametros de paginacao fora do range → {@code 400} (helper §3.3, mesmo
+     * padrao/handler do {@code ProdutoController}). Pagina alem do total → pagina vazia com
+     * {@code ultima=true} (§4). Nenhum item vaza {@code senha_hash} (§9 — {@link UsuarioResponse}).
+     */
     @Transactional(readOnly = true)
-    public List<UsuarioResponse> listar() {
-        return usuarioRepository.findAll(Sort.by(Sort.Direction.ASC, "nome")).stream()
-                .map(UsuarioResponse::de)
-                .toList();
+    public PaginaResponse<UsuarioResponse> listar(Integer pagina, Integer tamanho, String nome) {
+        Pageable pageable = PaginacaoParams.paraPageable(pagina, tamanho, ORDENACAO_PADRAO);
+        Page<Usuario> page = (nome == null || nome.isBlank())
+                ? usuarioRepository.findAll(pageable)
+                : usuarioRepository.findByNomeContainingIgnoreCase(nome.trim(), pageable);
+        return PaginaResponse.de(page, UsuarioResponse::de);
     }
 
     /** Detalha um usuario por id (CA-8); inexistente → {@link UsuarioNaoEncontradoException} (404). */

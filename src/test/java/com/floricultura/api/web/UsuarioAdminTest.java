@@ -181,17 +181,21 @@ class UsuarioAdminTest {
         criar("Zelia", "zelia@floricultura.local");
         criar("Bruno", "bruno@floricultura.local");
 
+        // RETROFIT M2 (AD-SQ-29/CA-21, mudanca SANCIONADA): GET /usuarios deixa de devolver array e
+        // passa a PaginaResponse — o array agora vive em $.data.conteudo e o total em
+        // $.data.totalElementos. Ordenacao (nome ASC) e o nao-vazamento de senha_hash seguem provados.
         mockMvc.perform(get("/api/v1/usuarios").header(HttpHeaders.AUTHORIZATION, adminBearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 // adminId(Administrador) + Bruno + Zelia = 3, ordenados por nome.
-                .andExpect(jsonPath("$.data.length()").value(3))
-                .andExpect(jsonPath("$.data[0].nome").value("Administrador"))
-                .andExpect(jsonPath("$.data[1].nome").value("Bruno"))
-                .andExpect(jsonPath("$.data[2].nome").value("Zelia"))
+                .andExpect(jsonPath("$.data.totalElementos").value(3))
+                .andExpect(jsonPath("$.data.conteudo.length()").value(3))
+                .andExpect(jsonPath("$.data.conteudo[0].nome").value("Administrador"))
+                .andExpect(jsonPath("$.data.conteudo[1].nome").value("Bruno"))
+                .andExpect(jsonPath("$.data.conteudo[2].nome").value("Zelia"))
                 // §9/CA-8: nenhum item vaza senha_hash.
-                .andExpect(jsonPath("$.data[0].senhaHash").doesNotExist())
-                .andExpect(jsonPath("$.data[1].senhaHash").doesNotExist());
+                .andExpect(jsonPath("$.data.conteudo[0].senhaHash").doesNotExist())
+                .andExpect(jsonPath("$.data.conteudo[1].senhaHash").doesNotExist());
     }
 
     @Test
