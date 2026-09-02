@@ -22,6 +22,13 @@ import org.springframework.web.cors.CorsConfigurationSource;
  * autenticado</b> — inclui rota inexistente sem token → 401 (AD-SQ-21; o 404 com token valido e
  * coberto no {@code AuthSecurityTest}).
  *
+ * <p><b>RBAC de produtos (M2/T-M2-3, FC-07):</b> {@code GET /api/v1/produtos/**} segue autenticado
+ * (USER+ADMIN) via {@code anyRequest().authenticated()}; {@code POST}/{@code PUT}/{@code DELETE} de
+ * {@code /api/v1/produtos/**} exigem {@code ROLE_ADMIN} (matchers por metodo, avaliados ANTES do
+ * catch-all) — USER que escreve → 403. O matcher {@code POST /produtos/**} ja cobre o futuro
+ * {@code POST .../movimentacoes} como ADMIN (T-M2-4). Nada muda em {@code /usuarios/**} nem nos
+ * {@code permitAll} do M1.
+ *
  * <p>Mantem do M0: CSRF off, CORS on (o {@code CorsFilter} entra ANTES da autorizacao, entao o
  * preflight {@code OPTIONS} e respondido sem exigir auth — §12/CA-M0-5), sessao STATELESS,
  * {@code httpBasic}/{@code formLogin} off, {@code PasswordEncoder} (BCrypt). Os handlers de erro
@@ -50,6 +57,9 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/v1/usuarios/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/produtos/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/produtos/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/produtos/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(authenticationEntryPoint)
