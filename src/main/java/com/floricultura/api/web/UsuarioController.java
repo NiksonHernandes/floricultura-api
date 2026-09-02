@@ -7,6 +7,8 @@ import com.floricultura.api.service.UsuarioNaoEncontradoException;
 import com.floricultura.api.service.UsuarioService;
 import com.floricultura.api.web.dto.AlterarStatusRequest;
 import com.floricultura.api.web.dto.CriarUsuarioRequest;
+import com.floricultura.api.web.dto.PaginaResponse;
+import com.floricultura.api.web.dto.ParametroPaginacaoInvalidoException;
 import com.floricultura.api.web.dto.RedefinirSenhaRequest;
 import com.floricultura.api.web.dto.UsuarioResponse;
 import com.floricultura.api.web.error.ErrorCode;
@@ -27,6 +29,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -38,7 +41,9 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <ul>
  *   <li>{@code POST /api/v1/usuarios} — 201 com {@link UsuarioResponse} (sem {@code senha_hash}).</li>
- *   <li>{@code GET /api/v1/usuarios} — 200 lista ordenada por {@code nome}.</li>
+ *   <li>{@code GET /api/v1/usuarios} — 200 com {@link PaginaResponse} de {@link UsuarioResponse}
+ *       (retrofit M2 — params {@code pagina}/{@code tamanho}/{@code nome}, ordenado {@code nome ASC};
+ *       range invalido → 400 no handler local). AD-SQ-29/CA-21.</li>
  *   <li>{@code GET /api/v1/usuarios/{id}} — 200 detalhe; 404 se inexistente.</li>
  *   <li>{@code PATCH /api/v1/usuarios/{id}/status} — 200 com {@link UsuarioResponse} atualizado;
  *       409 ao desativar o unico ADMIN ativo (§4/CA-9); 404 se inexistente.</li>
@@ -72,11 +77,22 @@ public class UsuarioController {
         return ApiResponse.ok(usuarioService.criar(request), http.getRequestURI());
     }
 
-    /** CA-8: lista usuarios (ordenada por {@code nome}), nenhum campo de senha exposto. */
-    @Operation(summary = "Lista usuarios (ordenada por nome)")
+    /**
+     * CA-21/AD-SQ-29: lista usuarios paginados (default {@code pagina=0}, {@code tamanho=20}),
+     * ordenados por {@code nome ASC}, com filtro opcional {@code nome} ({@code ILIKE '%nome%'}).
+     * {@code tamanho} fora de {@code 1..100} ou {@code pagina < 0} → 400 VALIDATION_ERROR (handler
+     * local). Retrofit do M2: deixa de devolver array e passa a {@link PaginaResponse}. Nenhum campo
+     * de senha e exposto (§9).
+     */
+    @Operation(summary = "Lista usuarios paginados (pagina/tamanho/nome), ordenados por nome ASC")
     @GetMapping
-    public ApiResponse<List<UsuarioResponse>> listar(HttpServletRequest http) {
-        return ApiResponse.ok(usuarioService.listar(), http.getRequestURI());
+    public ApiResponse<PaginaResponse<UsuarioResponse>> listar(
+            @RequestParam(required = false) Integer pagina,
+            @RequestParam(required = false) Integer tamanho,
+            @RequestParam(required = false) String nome,
+            HttpServletRequest http) {
+        return ApiResponse.ok(
+                usuarioService.listar(pagina, tamanho, nome), http.getRequestURI());
     }
 
     /** CA-8: detalha usuario por id; inexistente → 404. */
@@ -114,6 +130,21 @@ public class UsuarioController {
     }
 
     // ---- Handlers locais (nao tocam o GlobalExceptionHandler do M0 — §8) --------------------
+
+    /**
+     * 400 VALIDATION_ERROR para {@code pagina}/{@code tamanho} fora do contrato §3.3 (CA-21). Handler
+     * <b>local</b> ao {@code UsuarioController} (mesmo do {@code ProdutoController}): sem ele, a
+     * {@link ParametroPaginacaoInvalidoException} do helper de paginacao cairia no
+     * {@code @RestControllerAdvice} do M0 como 500 — aqui vira 400 com os {@code details} por campo.
+     */
+    @ExceptionHandler(ParametroPaginacaoInvalidoException.class)
+    public ResponseEntity<ApiResponse<Object>> handlePaginacaoInvalida(
+            ParametroPaginacaoInvalidoException ex, HttpServletRequest http) {
+        ApiError error = new ApiError(
+                ErrorCode.VALIDATION_ERROR.name(), ex.getMessage(), ex.getDetails());
+        return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.status())
+                .body(ApiResponse.fail(error, http.getRequestURI()));
+    }
 
     /** 409 CONFLICT ao desativar o unico ADMIN ativo (CA-9). */
     @ExceptionHandler(UltimoAdminException.class)
