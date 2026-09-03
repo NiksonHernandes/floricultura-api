@@ -54,6 +54,20 @@ public class Produto {
     @Column(name = "imagem_url", length = 1000)
     private String imagemUrl;
 
+    /**
+     * Metadados leves da imagem no banco (V5/AD-SQ-38). A coluna {@code imagem BYTEA} da V5 e
+     * <b>deliberadamente NAO mapeada</b> aqui: {@code ddl-auto=validate} so cobra as colunas mapeadas,
+     * entao o binario fica fora de {@code findAll}/{@code findById} (lista/detalhe nunca o materializam)
+     * — o invariante de performance do M3. O bytea e lido/escrito so por queries nativas dedicadas em
+     * {@link com.floricultura.api.repository.ProdutoRepository}. {@code imagemContentType != null}
+     * significa "tem imagem no banco" (base do {@code temImagem} — SPEC-M3 §3.5).
+     */
+    @Column(name = "imagem_content_type", length = 100)
+    private String imagemContentType;
+
+    @Column(name = "imagem_filename", length = 255)
+    private String imagemFilename;
+
     @Column(name = "ativo", nullable = false)
     private boolean ativo;
 
@@ -129,6 +143,22 @@ public class Produto {
 
     public void setImagemUrl(String imagemUrl) {
         this.imagemUrl = imagemUrl;
+    }
+
+    public String getImagemContentType() {
+        return imagemContentType;
+    }
+
+    public void setImagemContentType(String imagemContentType) {
+        this.imagemContentType = imagemContentType;
+    }
+
+    public String getImagemFilename() {
+        return imagemFilename;
+    }
+
+    public void setImagemFilename(String imagemFilename) {
+        this.imagemFilename = imagemFilename;
     }
 
     public boolean isAtivo() {

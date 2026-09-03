@@ -33,6 +33,9 @@ replay_pid*
 *.env
 !.env.example
 
+# Ferramenta DEV local para gerar o hash BCrypt do admin de PROD (AD-SQ-25) — nunca versionar.
+src/test/java/com/floricultura/api/tools/GerarHashTest.java
+
 # IntelliJ IDEA
 .idea/
 *.iml
