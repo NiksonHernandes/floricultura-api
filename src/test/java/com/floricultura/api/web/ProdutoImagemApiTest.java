@@ -3,6 +3,7 @@ package com.floricultura.api.web;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -17,6 +18,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -26,12 +28,16 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * Fatia de SERVIR/REMOVER a imagem do produto (M3/T-M3-2, CA-7/CA-8/CA-10 + comportamento de CA-9)
- * contra um PostgreSQL de DESCARTE (Testcontainers postgres:16), com {@code ProdutoImagemController}/
- * {@code ProdutoImagemService}, {@code SecurityConfig} endurecido e filtro JWT reais. Prova: o binario
- * servido fora do envelope com os headers exatos (CA-7); 404 — nunca 401 — sem imagem/inexistente
- * (CA-8); delete 204 idempotente, {@code temImagem} caindo para {@code false}, GET seguinte 404 e USER
- * 403 (CA-10); e {@code temImagem:true} no detalhe quando ha imagem (CA-9, P2 do review).
+ * Fatia de ENVIAR/SERVIR/REMOVER a imagem do produto (M3/T-M3-2+T-M3-3, CA-2..CA-8/CA-10 +
+ * comportamento de CA-9) contra um PostgreSQL de DESCARTE (Testcontainers postgres:16), com
+ * {@code ProdutoImagemController}/{@code ProdutoImagemService}, {@code SecurityConfig} endurecido e
+ * filtro JWT reais. Prova: upload feliz ADMIN → 200 + {@code temImagem:true} + bytes gravados (CA-2);
+ * USER 403 / sem token 401 (CA-3); tipo/spoof/vazio → 400 sem gravar (CA-4); inexistente → 404 (CA-6);
+ * binario servido fora do envelope com headers exatos (CA-7); 404 — nunca 401 — sem imagem/inexistente
+ * (CA-8); delete 204 idempotente + {@code temImagem} falso + GET 404 + USER 403 (CA-10); {@code
+ * temImagem} no detalhe (CA-9). O limite de tamanho (CA-5) fica em {@code ProdutoImagemLimiteTest}
+ * (precisa de {@code app.upload.imagem.max-bytes} reduzido). O teto do container (> 6MB) e dívida P2
+ * (smoke manual — MockMvc nao enforca limite de container).
  *
  * <p>Nome {@code *Test} (Surefire): o repo nao configura Failsafe — integracoes Testcontainers usam
  * {@code *Test} para rodarem no {@code clean verify} (mesma nota de {@code ProdutoWriteTest}). Segredos
@@ -46,6 +52,13 @@ class ProdutoImagemApiTest {
     private static final byte[] IMAGEM_JPEG =
             new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0x01, 0x02, 0x03, 0x04};
     private static final String IMAGEM_JPEG_HEX = "FFD8FF01020304";
+
+    /** PNG valido (magic 89 50 4E 47 0D 0A 1A 0A + payload) — anti-spoofing CA-2/CA-4. */
+    private static final byte[] IMAGEM_PNG =
+            new byte[] {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01};
+    /** WEBP valido: RIFF(0-3) + tamanho(4-7) + WEBP(8-11) — anti-spoofing CA-2/CA-4. */
+    private static final byte[] IMAGEM_WEBP =
+            new byte[] {0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50};
 
     private static final BCryptPasswordEncoder ENCODER = new BCryptPasswordEncoder();
 
@@ -239,5 +252,178 @@ class ProdutoImagemApiTest {
                         .header(HttpHeaders.AUTHORIZATION, userBearer))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    // ---- CA-2: upload feliz (ADMIN) -> 200 + temImagem:true + bytes gravados ------------------
+
+    @Test
+    void enviar_jpegValidoComAdmin_devolve200TemImagemEGravaBytes() throws Exception {
+        Long id = inserirProdutoSemImagem("Dalia");
+        MockMultipartFile parte =
+                new MockMultipartFile("arquivo", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, IMAGEM_JPEG);
+
+        mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(parte)
+                        .header(HttpHeaders.AUTHORIZATION, adminBearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.id").value(id))
+                .andExpect(jsonPath("$.data.temImagem").value(true));
+
+        // Bytes efetivamente gravados: o GET do binario devolve exatamente o enviado.
+        byte[] servido = mockMvc.perform(get("/api/v1/produtos/" + id + "/imagem")
+                        .header(HttpHeaders.AUTHORIZATION, userBearer))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, MediaType.IMAGE_JPEG_VALUE))
+                .andReturn().getResponse().getContentAsByteArray();
+        assertThat(servido).isEqualTo(IMAGEM_JPEG);
+    }
+
+    @Test
+    void enviar_pngValido_devolve200() throws Exception {
+        Long id = inserirProdutoSemImagem("Begonia");
+        MockMultipartFile parte =
+                new MockMultipartFile("arquivo", "foto.png", MediaType.IMAGE_PNG_VALUE, IMAGEM_PNG);
+
+        mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(parte)
+                        .header(HttpHeaders.AUTHORIZATION, adminBearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.temImagem").value(true));
+    }
+
+    @Test
+    void enviar_webpValido_devolve200() throws Exception {
+        Long id = inserirProdutoSemImagem("Hortensia");
+        MockMultipartFile parte =
+                new MockMultipartFile("arquivo", "foto.webp", "image/webp", IMAGEM_WEBP);
+
+        mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(parte)
+                        .header(HttpHeaders.AUTHORIZATION, adminBearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.temImagem").value(true));
+    }
+
+    /** CA-2: novo upload sobrescreve a imagem anterior (1 imagem/produto). */
+    @Test
+    void enviar_sobrescreveImagemAnterior() throws Exception {
+        Long id = inserirProdutoComImagem("Camelia"); // ja tem JPEG
+        MockMultipartFile novo =
+                new MockMultipartFile("arquivo", "novo.png", MediaType.IMAGE_PNG_VALUE, IMAGEM_PNG);
+
+        mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(novo)
+                        .header(HttpHeaders.AUTHORIZATION, adminBearer))
+                .andExpect(status().isOk());
+
+        byte[] servido = mockMvc.perform(get("/api/v1/produtos/" + id + "/imagem")
+                        .header(HttpHeaders.AUTHORIZATION, adminBearer))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, MediaType.IMAGE_PNG_VALUE))
+                .andReturn().getResponse().getContentAsByteArray();
+        assertThat(servido).isEqualTo(IMAGEM_PNG);
+    }
+
+    // ---- CA-3: RBAC do upload ----------------------------------------------------------------
+
+    @Test
+    void enviar_comUser_devolve403() throws Exception {
+        Long id = inserirProdutoSemImagem("Jasmim");
+        MockMultipartFile parte =
+                new MockMultipartFile("arquivo", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, IMAGEM_JPEG);
+
+        mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(parte)
+                        .header(HttpHeaders.AUTHORIZATION, userBearer))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void enviar_semToken_devolve401() throws Exception {
+        Long id = inserirProdutoSemImagem("Lavanda");
+        MockMultipartFile parte =
+                new MockMultipartFile("arquivo", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, IMAGEM_JPEG);
+
+        mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(parte))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+    }
+
+    // ---- CA-4: tipo invalido / spoof / vazio -> 400 sem gravar -------------------------------
+
+    @Test
+    void enviar_tipoForaDaWhitelist_devolve400SemGravar() throws Exception {
+        Long id = inserirProdutoSemImagem("Petunia2");
+        MockMultipartFile parte =
+                new MockMultipartFile("arquivo", "foto.gif", "image/gif", IMAGEM_JPEG);
+
+        mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(parte)
+                        .header(HttpHeaders.AUTHORIZATION, adminBearer))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.error.details[0].field").value("arquivo"))
+                .andExpect(jsonPath("$.error.details[0].message")
+                        .value("Tipo de imagem nao suportado (use JPG, PNG ou WEBP)."));
+
+        // Nada gravado: o GET do binario continua 404.
+        mockMvc.perform(get("/api/v1/produtos/" + id + "/imagem")
+                        .header(HttpHeaders.AUTHORIZATION, adminBearer))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void enviar_magicBytesNaoCasam_devolve400SemGravar() throws Exception {
+        Long id = inserirProdutoSemImagem("Anturio");
+        // Declara image/jpeg mas o conteudo e PNG -> spoof.
+        MockMultipartFile parte =
+                new MockMultipartFile("arquivo", "fake.jpg", MediaType.IMAGE_JPEG_VALUE, IMAGEM_PNG);
+
+        mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(parte)
+                        .header(HttpHeaders.AUTHORIZATION, adminBearer))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.error.details[0].field").value("arquivo"))
+                .andExpect(jsonPath("$.error.details[0].message")
+                        .value("O conteudo do arquivo nao corresponde a uma imagem JPG/PNG/WEBP valida."));
+
+        mockMvc.perform(get("/api/v1/produtos/" + id + "/imagem")
+                        .header(HttpHeaders.AUTHORIZATION, adminBearer))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void enviar_arquivoVazio_devolve400() throws Exception {
+        Long id = inserirProdutoSemImagem("Cisto");
+        MockMultipartFile parte =
+                new MockMultipartFile("arquivo", "vazio.jpg", MediaType.IMAGE_JPEG_VALUE, new byte[0]);
+
+        mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(parte)
+                        .header(HttpHeaders.AUTHORIZATION, adminBearer))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.error.details[0].field").value("arquivo"))
+                .andExpect(jsonPath("$.error.details[0].message").value("Envie um arquivo de imagem."));
+    }
+
+    @Test
+    void enviar_semParteArquivo_devolve400() throws Exception {
+        Long id = inserirProdutoSemImagem("Freesia");
+
+        // Sem nenhuma parte 'arquivo' -> required=false -> null -> validacao amigavel.
+        mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem")
+                        .header(HttpHeaders.AUTHORIZATION, adminBearer))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.error.details[0].message").value("Envie um arquivo de imagem."));
+    }
+
+    // ---- CA-6: upload em produto inexistente -> 404 ------------------------------------------
+
+    @Test
+    void enviar_produtoInexistente_devolve404() throws Exception {
+        MockMultipartFile parte =
+                new MockMultipartFile("arquivo", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, IMAGEM_JPEG);
+
+        mockMvc.perform(multipart("/api/v1/produtos/999999/imagem").file(parte)
+                        .header(HttpHeaders.AUTHORIZATION, adminBearer))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
     }
 }

@@ -45,6 +45,10 @@ spring:
     multipart:
       max-file-size: 6MB
       max-request-size: 6MB
+      # T-M3-3: resolucao preguicosa do multipart — o parsing (e o limite do container) so dispara na
+      # resolucao do argumento MultipartFile, com o handler ja mapeado, para o @ExceptionHandler LOCAL
+      # do ProdutoImagemController traduzir MaxUploadSizeExceededException -> 400 sem tocar web/error/*.
+      resolve-lazily: true
 
 # M1 — JWT (SPEC-M1 §3.3/§3.5): segredo HS256 via env, sem default (o app FALHA ao subir sem
 # APP_JWT_SECRET — §9); TTL em segundos, default 3600. Consumidores (JwtService) entram no T-M1-2.
