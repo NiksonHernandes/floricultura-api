@@ -1,7 +1,7 @@
 # Profile dev (SPEC-M0 §3.3). Credenciais vem de env vars exportadas no ambiente/IDE (ver .env.example).
 spring:
   jpa:
-    show-sql: true
+    show-sql: false
   flyway:
     # dev carrega migracoes comuns + o seed dev-only (AD-SQ-23). A lista SUBSTITUI (nao mescla) a de
     # application.yml, entao os dois locations precisam ser listados. Prod NAO tem db/migration-dev.
