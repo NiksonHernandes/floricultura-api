@@ -7,6 +7,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -33,4 +34,43 @@ public interface ProdutoRepository extends JpaRepository<Produto, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from Produto p where p.id = :id")
     Optional<Produto> findByIdForUpdate(@Param("id") Long id);
+
+    // ----- Imagem no banco (M3/AD-SQ-38): binario FORA da @Entity, so por query nativa dedicada. -----
+
+    /**
+     * Carrega <b>so</b> o binario + content-type da imagem para servir o endpoint dedicado (SPEC-M3
+     * §3.5, T-M3-2). Query <b>nativa</b> projetada: a {@code @Entity Produto} nao mapeia {@code imagem}
+     * (bytea), entao este e o unico caminho que materializa o binario — lista/detalhe nunca o trazem.
+     * Aliases em camelCase ({@code imagemContentType}) casam os getters de {@link
+     * ProdutoImagemProjection}. Vazio → produto inexistente (404).
+     */
+    @Query(value = "SELECT imagem AS imagem, imagem_content_type AS imagemContentType "
+            + "FROM produto WHERE id = :id", nativeQuery = true)
+    Optional<ProdutoImagemProjection> findImagemById(@Param("id") Long id);
+
+    /**
+     * Grava/substitui a imagem no banco via {@code UPDATE} <b>nativo</b> (o bytea nao passa pela
+     * @Entity) e estampa {@code atualizado_em = now()} — bumpa o {@code v} da URL versionada do front
+     * (SPEC-M3 §3.3, T-M3-3). Retorna a contagem de linhas afetadas: {@code 0} → produto inexistente
+     * (404).
+     */
+    @Modifying
+    @Query(value = "UPDATE produto SET imagem = :bytes, imagem_content_type = :contentType, "
+            + "imagem_filename = :filename, atualizado_em = now() WHERE id = :id", nativeQuery = true)
+    int atualizarImagem(
+            @Param("id") Long id,
+            @Param("bytes") byte[] bytes,
+            @Param("contentType") String contentType,
+            @Param("filename") String filename);
+
+    /**
+     * Remove a imagem do banco (zera bytea + metadados) via {@code UPDATE} <b>nativo</b> e estampa
+     * {@code atualizado_em = now()} (SPEC-M3 §3.3, T-M3-2). Idempotente no servico: produto existente
+     * sem imagem ainda afeta 1 linha (→ 204). Retorna a contagem de linhas: {@code 0} → produto
+     * inexistente (404).
+     */
+    @Modifying
+    @Query(value = "UPDATE produto SET imagem = NULL, imagem_content_type = NULL, "
+            + "imagem_filename = NULL, atualizado_em = now() WHERE id = :id", nativeQuery = true)
+    int removerImagem(@Param("id") Long id);
 }
