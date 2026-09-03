@@ -21,6 +21,8 @@ import java.time.Instant;
  * @param quantidadeResultante estoque do produto apos aplicar a movimentacao
  * @param motivo               motivo livre (pode ser {@code null})
  * @param usuarioId            id do autor (do {@code @AuthenticationPrincipal}; pode ser {@code null})
+ * @param usuarioNome          snapshot do nome do autor (V7/AD-SQ-45; {@code null} em linhas historicas
+ *                             pre-V7 ou autor desconhecido — front exibe "—")
  * @param criadoEm             instante de criacao (UTC ISO-8601), do {@code DEFAULT now()} do banco
  */
 public record MovimentacaoResponse(
@@ -32,6 +34,7 @@ public record MovimentacaoResponse(
         BigDecimal quantidadeResultante,
         String motivo,
         Long usuarioId,
+        String usuarioNome,
         Instant criadoEm) {
 
     /**
@@ -57,6 +60,7 @@ public record MovimentacaoResponse(
                 mov.getQuantidadeResultante(),
                 mov.getMotivo(),
                 mov.getUsuarioId(),
+                mov.getUsuarioNome(),
                 criadoEm);
     }
 }

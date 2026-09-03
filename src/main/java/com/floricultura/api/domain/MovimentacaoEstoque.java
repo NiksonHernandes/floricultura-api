@@ -21,9 +21,11 @@ import java.time.Instant;
  *
  * <p>{@code produtoId} e {@code usuarioId} sao mapeados como escalares {@code Long} anulaveis (FK
  * {@code ON DELETE SET NULL}) — sem {@code @ManyToOne} para nao acoplar cascade/lazy a um ledger
- * insert-only. {@code produtoNome} e o snapshot que preserva o historico apos o delete do produto.
- * {@code tipo} e {@code String} (mirror da V1 {@code VARCHAR(20)} CHECK ENTRADA/SAIDA/AJUSTE).
- * {@code criadoEm} e {@code insertable=false, updatable=false} (valor do {@code DEFAULT now()}).
+ * insert-only. {@code produtoNome} e o snapshot que preserva o historico apos o delete do produto;
+ * {@code usuarioNome} (V7/AD-SQ-45) e o snapshot analogo do <b>autor</b> (sobrevive ao delete do
+ * usuario; {@code null} em linhas historicas pre-V7). {@code tipo} e {@code String} (mirror da V1
+ * {@code VARCHAR(20)} CHECK ENTRADA/SAIDA/AJUSTE). {@code criadoEm} e {@code insertable=false,
+ * updatable=false} (valor do {@code DEFAULT now()}).
  */
 @Entity
 @Table(name = "movimentacao_estoque")
@@ -53,6 +55,9 @@ public class MovimentacaoEstoque {
 
     @Column(name = "usuario_id")
     private Long usuarioId;
+
+    @Column(name = "usuario_nome", length = 120)
+    private String usuarioNome;
 
     @Column(name = "criado_em", nullable = false, insertable = false, updatable = false)
     private Instant criadoEm;
@@ -123,6 +128,14 @@ public class MovimentacaoEstoque {
 
     public void setUsuarioId(Long usuarioId) {
         this.usuarioId = usuarioId;
+    }
+
+    public String getUsuarioNome() {
+        return usuarioNome;
+    }
+
+    public void setUsuarioNome(String usuarioNome) {
+        this.usuarioNome = usuarioNome;
     }
 
     public Instant getCriadoEm() {
