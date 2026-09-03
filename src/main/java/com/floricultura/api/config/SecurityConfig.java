@@ -29,6 +29,11 @@ import org.springframework.web.cors.CorsConfigurationSource;
  * {@code POST .../movimentacoes} como ADMIN (T-M2-4). Nada muda em {@code /usuarios/**} nem nos
  * {@code permitAll} do M1.
  *
+ * <p><b>RBAC de eventos (M4/T-M4-2, §3.6):</b> mesmo padrao — {@code GET /api/v1/eventos/**} (inclui
+ * {@code /eventos/proximos}) segue autenticado (USER+ADMIN); {@code POST}/{@code PUT}/{@code DELETE} de
+ * {@code /api/v1/eventos/**} exigem {@code ROLE_ADMIN}. {@code GET /api/v1/movimentacoes} (lista global,
+ * T-M4-10) cai no catch-all autenticado, sem matcher novo.
+ *
  * <p>Mantem do M0: CSRF off, CORS on (o {@code CorsFilter} entra ANTES da autorizacao, entao o
  * preflight {@code OPTIONS} e respondido sem exigir auth — §12/CA-M0-5), sessao STATELESS,
  * {@code httpBasic}/{@code formLogin} off, {@code PasswordEncoder} (BCrypt). Os handlers de erro
@@ -60,6 +65,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/produtos/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/v1/produtos/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/produtos/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/eventos/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/eventos/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/eventos/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(authenticationEntryPoint)
