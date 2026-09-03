@@ -3,6 +3,7 @@ package com.floricultura.api.web.dto;
 import com.floricultura.api.domain.Produto;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 /**
  * {@code data} das respostas de leitura de produto (SPEC-M2 §3.2): item de
@@ -30,6 +31,11 @@ import java.time.Instant;
  *                      imagemContentType}, nunca do binario (que a @Entity nao carrega — AD-SQ-38);
  *                      ortogonal a {@code imagemUrl} (prioridade de exibicao no front: banco → URL →
  *                      placeholder — SPEC-M3 §3.2/AD-SQ-37)
+ * @param sazonal       {@code true} quando o produto tem ao menos um vinculo em {@code evento_produto}
+ *                      (M4/AD-SQ-44) — computado por {@code @Formula} na @Entity (1 query/pagina, sem
+ *                      colecao nem bytea); <b>sempre presente</b> (lista e detalhe)
+ * @param eventoIds     ids dos eventos vinculados — presente <b>so no detalhe</b> {@code GET /{id}};
+ *                      na lista vem {@code null} (documentado, evita N+1 — §3.4/AD-SQ-44)
  */
 public record ProdutoResponse(
         Long id,
@@ -44,14 +50,34 @@ public record ProdutoResponse(
         boolean ativo,
         Instant criadoEm,
         Instant atualizadoEm,
-        boolean temImagem) {
+        boolean temImagem,
+        boolean sazonal,
+        List<Long> eventoIds) {
 
     /**
-     * Mapeia a entidade para o response, computando {@code estoqueBaixo} (FC-13/CA-15) e {@code
-     * temImagem} do metadado leve {@code imagemContentType} (SPEC-M3 §3.2/§3.5) — o {@code bytea}
-     * nunca e materializado nas leituras (AD-SQ-38).
+     * Mapeia a entidade para o response (lista / retorno de escrita sem detalhe), com {@code
+     * eventoIds=null} (§3.4 — a colecao so vem no detalhe, evitando N+1). Computa {@code estoqueBaixo}
+     * (FC-13/CA-15), {@code temImagem} do metadado leve {@code imagemContentType} (SPEC-M3 §3.2/§3.5) e
+     * {@code sazonal} do {@code @Formula} da @Entity (AD-SQ-44) — o {@code bytea} nunca e materializado
+     * nas leituras (AD-SQ-38).
      */
     public static ProdutoResponse de(Produto produto) {
+        // Lista: sazonal vem do @Formula da @Entity (recem-carregada pelo findAll — valor fresco).
+        return montar(produto, produto.isSazonal(), null);
+    }
+
+    /**
+     * Variante de <b>detalhe</b> ({@code GET /produtos/{id}} e retorno de POST/PUT): inclui os {@code
+     * eventoIds} vinculados (§3.4/CA-9). {@code sazonal} e <b>derivado da colecao carregada</b>
+     * ({@code !eventoIds.isEmpty()}) — identico ao {@code exists(...)} do @Formula, porem consistente
+     * com {@code eventoIds} e imune a staleness do @Formula no caminho de escrita (mesma transacao).
+     */
+    public static ProdutoResponse deDetalhe(Produto produto, List<Long> eventoIds) {
+        boolean sazonal = eventoIds != null && !eventoIds.isEmpty();
+        return montar(produto, sazonal, eventoIds);
+    }
+
+    private static ProdutoResponse montar(Produto produto, boolean sazonal, List<Long> eventoIds) {
         boolean estoqueBaixo =
                 produto.getEstoqueAtual().compareTo(produto.getEstoqueMinimo()) <= 0;
         boolean temImagem = produto.getImagemContentType() != null;
@@ -68,6 +94,8 @@ public record ProdutoResponse(
                 produto.isAtivo(),
                 produto.getCriadoEm(),
                 produto.getAtualizadoEm(),
-                temImagem);
+                temImagem,
+                sazonal,
+                eventoIds);
     }
 }

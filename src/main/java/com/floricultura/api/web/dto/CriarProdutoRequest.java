@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
+import java.util.List;
 
 /**
  * Corpo de {@code POST /api/v1/produtos} (SPEC-M2 §3.2, CA-6/CA-9) — criacao de produto pelo ADMIN.
@@ -26,6 +27,8 @@ import java.math.BigDecimal;
  * @param estoqueMinimo estoque minimo (obrigatorio, {@code >= 0})
  * @param preco         preco unitario (opcional; se presente {@code >= 0})
  * @param imagemUrl     URL da imagem (opcional, ≤1000; sem validacao de existencia)
+ * @param eventoIds     ids dos eventos a vincular (opcional; default {@code []} — M4/§3.4, CA-9/CA-11).
+ *                      Replace-set no servico; id inexistente → 400 {@code field=eventoIds}
  */
 public record CriarProdutoRequest(
         @NotBlank @Size(min = 2, max = 150) String nome,
@@ -35,5 +38,16 @@ public record CriarProdutoRequest(
         @NotNull @DecimalMin(value = "0", message = "estoqueMinimo deve ser >= 0")
                 BigDecimal estoqueMinimo,
         @DecimalMin(value = "0", message = "preco deve ser >= 0") BigDecimal preco,
-        @Size(max = 1000) String imagemUrl) {
+        @Size(max = 1000) String imagemUrl,
+        List<Long> eventoIds) {
+
+    /**
+     * Construtor de compatibilidade (M2): 6 campos, sem {@code eventoIds} ⇒ {@code null} = "vinculos
+     * nao informados" (o servico nao mexe nos links — update parcial; M4 sempre envia o campo).
+     * Preserva chamadas positionais do M2 sem tocar testes existentes (aditivo).
+     */
+    public CriarProdutoRequest(String nome, String descricao, String unidadeMedida,
+            BigDecimal estoqueMinimo, BigDecimal preco, String imagemUrl) {
+        this(nome, descricao, unidadeMedida, estoqueMinimo, preco, imagemUrl, null);
+    }
 }

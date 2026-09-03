@@ -1,6 +1,7 @@
 package com.floricultura.api.web;
 
 import com.floricultura.api.config.OpenApiConfig;
+import com.floricultura.api.service.EventoInexistenteException;
 import com.floricultura.api.service.ProdutoNaoEncontradoException;
 import com.floricultura.api.service.ProdutoService;
 import com.floricultura.api.web.dto.AtualizarProdutoRequest;
@@ -152,6 +153,16 @@ public class ProdutoController {
             ProdutoNaoEncontradoException ex, HttpServletRequest http) {
         ApiError error = new ApiError(ErrorCode.NOT_FOUND.name(), ex.getMessage(), List.of());
         return ResponseEntity.status(ErrorCode.NOT_FOUND.status())
+                .body(ApiResponse.fail(error, http.getRequestURI()));
+    }
+
+    /** 400 VALIDATION_ERROR: {@code eventoIds} com id inexistente no POST/PUT (M4/CA-11). */
+    @ExceptionHandler(EventoInexistenteException.class)
+    public ResponseEntity<ApiResponse<Object>> handleEventoInexistente(
+            EventoInexistenteException ex, HttpServletRequest http) {
+        ApiError error = new ApiError(
+                ErrorCode.VALIDATION_ERROR.name(), ex.getMessage(), ex.getDetails());
+        return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.status())
                 .body(ApiResponse.fail(error, http.getRequestURI()));
     }
 }
