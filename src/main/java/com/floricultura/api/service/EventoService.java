@@ -2,11 +2,14 @@ package com.floricultura.api.service;
 
 import com.floricultura.api.domain.Evento;
 import com.floricultura.api.domain.EventoFactory;
+import com.floricultura.api.domain.Produto;
 import com.floricultura.api.repository.EventoRepository;
+import com.floricultura.api.repository.ProdutoRepository;
 import com.floricultura.api.web.dto.EventoRequest;
 import com.floricultura.api.web.dto.EventoResponse;
 import com.floricultura.api.web.dto.PaginaResponse;
 import com.floricultura.api.web.dto.PaginacaoParams;
+import com.floricultura.api.web.dto.ProdutoResponse;
 import java.time.Instant;
 import java.time.LocalDate;
 import org.springframework.context.annotation.Lazy;
@@ -33,10 +36,17 @@ public class EventoService {
     private static final Sort ORDENACAO_PADRAO =
             Sort.by(Sort.Order.asc("dataInicio"), Sort.Order.asc("nome"));
 
-    private final EventoRepository eventoRepository;
+    /** Ordenacao da vitrine (SPEC-M4.1 §3.1): {@code nome ASC} (aplicado a query nativa). */
+    private static final Sort ORDENACAO_VITRINE = Sort.by("nome").ascending();
 
-    public EventoService(@Lazy EventoRepository eventoRepository) {
+    private final EventoRepository eventoRepository;
+    private final ProdutoRepository produtoRepository;
+
+    public EventoService(
+            @Lazy EventoRepository eventoRepository,
+            @Lazy ProdutoRepository produtoRepository) {
         this.eventoRepository = eventoRepository;
+        this.produtoRepository = produtoRepository;
     }
 
     /**
@@ -51,6 +61,39 @@ public class EventoService {
                 ? eventoRepository.findAll(pageable)
                 : eventoRepository.findByNomeContainingIgnoreCase(nome.trim(), pageable);
         return PaginaResponse.de(page, EventoResponse::de);
+    }
+
+    /**
+     * Lista paginada dos produtos vinculados ao evento (vitrine — SPEC-M4.1 §3.1/§4.1, CA-1/CA-2).
+     * Valida a existencia do evento <b>antes</b> de paginar → {@link EventoNaoEncontradoException}
+     * (404) se inexistente (nao devolve pagina vazia — ancora #2). Ordem {@code nome ASC} via
+     * {@link PaginacaoParams} (range invalido → 400 — ancora #1). Evento existente sem produtos →
+     * {@code 200} com {@code conteudo=[]}, {@code totalElementos=0} (CA-2). Itens na variante de lista
+     * ({@code eventoIds=null}, sem {@code bytea} — AD-SQ-38/ancora #3) e {@code sazonal=true} fixo (PA#2).
+     */
+    @Transactional(readOnly = true)
+    public PaginaResponse<ProdutoResponse> listarProdutos(Long id, Integer pagina, Integer tamanho) {
+        if (!eventoRepository.existsById(id)) {
+            throw new EventoNaoEncontradoException();
+        }
+        Pageable pageable = PaginacaoParams.paraPageable(pagina, tamanho, ORDENACAO_VITRINE);
+        Page<Produto> page = produtoRepository.buscarPorEvento(id, pageable);
+        return PaginaResponse.de(page, EventoService::paraVitrine);
+    }
+
+    /**
+     * Variante de lista da vitrine: reusa {@link ProdutoResponse#de} (computa {@code estoqueBaixo}/
+     * {@code temImagem}, mantem {@code eventoIds=null}, nao materializa {@code bytea}) e <b>fixa</b>
+     * {@code sazonal=true} (PA#2/§4.1 — todo item e vinculado ao evento; o {@code @Formula} nao e
+     * confiavel sob query nativa, entao nao o lemos).
+     */
+    private static ProdutoResponse paraVitrine(Produto p) {
+        ProdutoResponse base = ProdutoResponse.de(p);
+        return new ProdutoResponse(
+                base.id(), base.nome(), base.descricao(), base.unidadeMedida(),
+                base.estoqueMinimo(), base.estoqueAtual(), base.preco(), base.imagemUrl(),
+                base.estoqueBaixo(), base.ativo(), base.criadoEm(), base.atualizadoEm(),
+                base.temImagem(), true, null);
     }
 
     /** Detalha um evento por id (CA-5). Inexistente → {@link EventoNaoEncontradoException} (404). */
