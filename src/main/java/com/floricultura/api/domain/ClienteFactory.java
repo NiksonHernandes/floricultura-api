@@ -1,0 +1,38 @@
+package com.floricultura.api.domain;
+
+/**
+ * Fabrica de {@link Cliente} para a criacao por ADMIN (SPEC-M5 §3.2/§3.3, CA-4). Vive no MESMO pacote de
+ * {@link Cliente} porque o construtor da entidade e {@code protected} (exigido pelo JPA) — este helper
+ * permite instancia-la a partir da camada de servico <b>sem alterar a entity</b> (mesma convencao de
+ * {@code EventoFactory}/{@code ProdutoFactory}).
+ *
+ * <p>{@code criado_em}/{@code atualizado_em} <b>nao</b> sao setados aqui: vem do {@code DEFAULT now()}
+ * do banco (colunas {@code insertable=false}). Os vinculos N:N {@code produtoIds} sao aplicados por
+ * query nativa dedicada no {@code ClienteProdutoVinculoService} (T-M5-4), nao pela fabrica.
+ */
+public final class ClienteFactory {
+
+    private ClienteFactory() {
+        // Utilitaria — sem instancia.
+    }
+
+    /**
+     * Cria um cliente transiente pronto para {@code save}. Os campos ja chegam validados na forma pelo
+     * {@code ClienteRequest} (Bean Validation — {@code nome} obrigatorio; {@code email} formato quando
+     * presente).
+     *
+     * @param nome        nome de exibicao (obrigatorio)
+     * @param telefone    telefone livre (pode ser {@code null})
+     * @param email       e-mail (pode ser {@code null}; formato validado quando presente)
+     * @param observacoes observacoes livres ≤500 (pode ser {@code null})
+     * @return entidade transiente pronta para persistir
+     */
+    public static Cliente novo(String nome, String telefone, String email, String observacoes) {
+        Cliente cliente = new Cliente();
+        cliente.setNome(nome);
+        cliente.setTelefone(telefone);
+        cliente.setEmail(email);
+        cliente.setObservacoes(observacoes);
+        return cliente;
+    }
+}
