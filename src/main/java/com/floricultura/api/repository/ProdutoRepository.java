@@ -2,6 +2,7 @@ package com.floricultura.api.repository;
 
 import com.floricultura.api.domain.Produto;
 import jakarta.persistence.LockModeType;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -73,4 +74,25 @@ public interface ProdutoRepository extends JpaRepository<Produto, Long> {
     @Query(value = "UPDATE produto SET imagem = NULL, imagem_content_type = NULL, "
             + "imagem_filename = NULL, atualizado_em = now() WHERE id = :id", nativeQuery = true)
     int removerImagem(@Param("id") Long id);
+
+    // ----- Vinculo N:N produto<->evento (M4/AD-SQ-44): replace-set por queries nativas dedicadas. -----
+
+    /** Ids dos eventos vinculados ao produto (detalhe {@code GET /{id}} — §3.4/CA-9), ordenados. */
+    @Query(value = "SELECT evento_id FROM evento_produto WHERE produto_id = :produtoId "
+            + "ORDER BY evento_id", nativeQuery = true)
+    List<Long> findEventoIdsByProdutoId(@Param("produtoId") Long produtoId);
+
+    /** Apaga todos os vinculos do produto (1o passo do replace-set — §4.2). */
+    @Modifying
+    @Query(value = "DELETE FROM evento_produto WHERE produto_id = :produtoId", nativeQuery = true)
+    void removerVinculosDoProduto(@Param("produtoId") Long produtoId);
+
+    /**
+     * Insere um vinculo produto<->evento (2o passo do replace-set — §4.2). {@code ON CONFLICT DO
+     * NOTHING} torna a insercao idempotente para ids repetidos ja deduplicados no servico.
+     */
+    @Modifying
+    @Query(value = "INSERT INTO evento_produto (produto_id, evento_id) VALUES (:produtoId, :eventoId) "
+            + "ON CONFLICT DO NOTHING", nativeQuery = true)
+    void inserirVinculo(@Param("produtoId") Long produtoId, @Param("eventoId") Long eventoId);
 }

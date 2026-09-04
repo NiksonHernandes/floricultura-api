@@ -2,6 +2,7 @@ package com.floricultura.api.service;
 
 import com.floricultura.api.domain.Produto;
 import com.floricultura.api.domain.ProdutoFactory;
+import com.floricultura.api.repository.EventoRepository;
 import com.floricultura.api.repository.ProdutoRepository;
 import com.floricultura.api.web.dto.AtualizarProdutoRequest;
 import com.floricultura.api.web.dto.CriarProdutoRequest;
@@ -9,6 +10,7 @@ import com.floricultura.api.web.dto.PaginaResponse;
 import com.floricultura.api.web.dto.PaginacaoParams;
 import com.floricultura.api.web.dto.ProdutoResponse;
 import java.time.Instant;
+import java.util.List;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -33,9 +35,16 @@ public class ProdutoService {
     private static final Sort ORDENACAO_PADRAO = Sort.by(Sort.Direction.ASC, "nome");
 
     private final ProdutoRepository produtoRepository;
+    private final EventoRepository eventoRepository;
+    private final ProdutoEventoVinculoService vinculoService;
 
-    public ProdutoService(@Lazy ProdutoRepository produtoRepository) {
+    public ProdutoService(
+            @Lazy ProdutoRepository produtoRepository,
+            @Lazy EventoRepository eventoRepository,
+            ProdutoEventoVinculoService vinculoService) {
         this.produtoRepository = produtoRepository;
+        this.eventoRepository = eventoRepository;
+        this.vinculoService = vinculoService;
     }
 
     /**
@@ -59,9 +68,10 @@ public class ProdutoService {
      */
     @Transactional(readOnly = true)
     public ProdutoResponse detalhar(Long id) {
-        return produtoRepository.findById(id)
-                .map(ProdutoResponse::de)
+        Produto produto = produtoRepository.findById(id)
                 .orElseThrow(ProdutoNaoEncontradoException::new);
+        // Detalhe (§3.4/CA-9): carrega os eventoIds vinculados (na lista vem null, evita N+1).
+        return ProdutoResponse.deDetalhe(produto, produtoRepository.findEventoIdsByProdutoId(id));
     }
 
     /**
@@ -76,6 +86,8 @@ public class ProdutoService {
      * {@code insertable=false}, vindas do {@code DEFAULT now()} do banco — T-M2-1).
      */
     public ProdutoResponse criar(CriarProdutoRequest req) {
+        // Valida eventoIds ANTES de qualquer escrita (CA-11: id inexistente → 400, nada persiste).
+        List<Long> eventoIds = normalizarEValidarEventos(req.eventoIds());
         Produto produto = ProdutoFactory.novo(
                 req.nome(),
                 req.descricao(),
@@ -84,9 +96,12 @@ public class ProdutoService {
                 req.preco(),
                 req.imagemUrl());
         Long id = produtoRepository.save(produto).getId();
-        return produtoRepository.findById(id)
-                .map(ProdutoResponse::de)
+        if (eventoIds != null) {
+            vinculoService.substituir(id, eventoIds); // replace-set atomico (transacao propria)
+        }
+        Produto salvo = produtoRepository.findById(id)
                 .orElseThrow(ProdutoNaoEncontradoException::new);
+        return ProdutoResponse.deDetalhe(salvo, produtoRepository.findEventoIdsByProdutoId(id));
     }
 
     /**
@@ -97,6 +112,7 @@ public class ProdutoService {
      */
     @Transactional
     public ProdutoResponse atualizar(Long id, AtualizarProdutoRequest req) {
+        List<Long> eventoIds = normalizarEValidarEventos(req.eventoIds());
         Produto produto = produtoRepository.findById(id)
                 .orElseThrow(ProdutoNaoEncontradoException::new);
         produto.setNome(req.nome());
@@ -106,7 +122,12 @@ public class ProdutoService {
         produto.setPreco(req.preco());
         produto.setImagemUrl(req.imagemUrl());
         produto.setAtualizadoEm(Instant.now()); // §4: PUT avanca atualizado_em; estoqueAtual intacto
-        return ProdutoResponse.de(produtoRepository.save(produto));
+        produtoRepository.save(produto);
+        if (eventoIds != null) {
+            vinculoService.substituir(id, eventoIds); // replace-set (junta esta transacao)
+        }
+        // Le os eventoIds atuais (query nativa, fora do 1o nivel) para o detalhe da resposta.
+        return ProdutoResponse.deDetalhe(produto, produtoRepository.findEventoIdsByProdutoId(id));
     }
 
     /**
@@ -123,5 +144,28 @@ public class ProdutoService {
             throw new ProdutoNaoEncontradoException();
         }
         produtoRepository.deleteById(id);
+    }
+
+    /**
+     * Normaliza/valida {@code eventoIds} do payload (§3.4/§4.2): {@code null} (campo ausente) →
+     * {@code null} = "nao mexer nos vinculos" (update parcial; o M4 sempre envia o campo); presente
+     * (inclusive {@code []}) → replace-set. Ids deduplicados (nulos descartados); cada id deve existir,
+     * senao → {@link EventoInexistenteException} (400 {@code field=eventoIds}) <b>antes</b> de qualquer
+     * escrita (CA-11).
+     */
+    private List<Long> normalizarEValidarEventos(List<Long> eventoIds) {
+        if (eventoIds == null) {
+            return null; // campo ausente: nao altera o conjunto de vinculos
+        }
+        if (eventoIds.isEmpty()) {
+            return List.of(); // presente vazio: replace-set para "sem vinculos"
+        }
+        List<Long> dedup = eventoIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        for (Long eventoId : dedup) {
+            if (!eventoRepository.existsById(eventoId)) {
+                throw new EventoInexistenteException(eventoId);
+            }
+        }
+        return dedup;
     }
 }

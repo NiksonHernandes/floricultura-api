@@ -11,11 +11,14 @@ import java.math.BigDecimal;
  *
  * <p>Grava os invariantes de uma linha do ledger insert-only (AD-SQ-8): o {@code produtoNome} e o
  * {@code snapshot} do nome no momento da movimentacao (sobrevive ao hard delete do produto), a
- * {@code quantidadeResultante} e o {@code estoque_atual} <b>apos</b> aplicar a movimentacao, e o
- * {@code usuarioId} vem do {@code @AuthenticationPrincipal} (nunca do payload — §9). {@code id} e
- * {@code criadoEm} <b>nao</b> sao setados aqui: {@code id} e {@code IDENTITY} e {@code criado_em} vem
- * do {@code DEFAULT now()} do banco (coluna {@code insertable=false}) — o servico faz {@code refresh}
- * apos o {@code flush} para carrega-los.
+ * {@code quantidadeResultante} e o {@code estoque_atual} <b>apos</b> aplicar a movimentacao, o
+ * {@code usuarioId} vem do {@code @AuthenticationPrincipal} (nunca do payload — §9) e o
+ * {@code usuarioNome} e o snapshot do <b>autor</b> (V7/AD-SQ-45), resolvido pelo servico via
+ * {@code UsuarioRepository.findNomeById} (sobrevive ao delete do usuario; {@code null} se
+ * desconhecido). {@code id} e {@code criadoEm} <b>nao</b> sao setados aqui: {@code id} e
+ * {@code IDENTITY} e {@code criado_em} vem do {@code DEFAULT now()} do banco (coluna
+ * {@code insertable=false}) — o servico le o valor real por <b>projecao escalar</b> apos o
+ * {@code saveAndFlush} (§12: nao ha {@code EntityManager.refresh}).
  */
 public final class MovimentacaoFactory {
 
@@ -33,6 +36,7 @@ public final class MovimentacaoFactory {
      * @param quantidadeResultante estoque apos aplicar a movimentacao
      * @param motivo               motivo livre (pode ser {@code null})
      * @param usuarioId            id do autor (do principal autenticado)
+     * @param usuarioNome          snapshot do nome do autor (V7/AD-SQ-45; pode ser {@code null})
      * @return entidade transiente pronta para persistir
      */
     public static MovimentacaoEstoque nova(
@@ -42,7 +46,8 @@ public final class MovimentacaoFactory {
             BigDecimal quantidade,
             BigDecimal quantidadeResultante,
             String motivo,
-            Long usuarioId) {
+            Long usuarioId,
+            String usuarioNome) {
         MovimentacaoEstoque mov = new MovimentacaoEstoque();
         mov.setProdutoId(produtoId);
         mov.setProdutoNome(produtoNome);
@@ -51,6 +56,7 @@ public final class MovimentacaoFactory {
         mov.setQuantidadeResultante(quantidadeResultante);
         mov.setMotivo(motivo);
         mov.setUsuarioId(usuarioId);
+        mov.setUsuarioNome(usuarioNome);
         return mov;
     }
 }

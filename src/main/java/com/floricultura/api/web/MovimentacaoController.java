@@ -1,6 +1,7 @@
 package com.floricultura.api.web;
 
 import com.floricultura.api.config.OpenApiConfig;
+import com.floricultura.api.repository.UsuarioRepository;
 import com.floricultura.api.service.EstoqueInsuficienteException;
 import com.floricultura.api.service.MovimentacaoService;
 import com.floricultura.api.service.ProdutoNaoEncontradoException;
@@ -19,6 +20,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -62,9 +64,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class MovimentacaoController {
 
     private final MovimentacaoService movimentacaoService;
+    private final UsuarioRepository usuarioRepository;
 
-    public MovimentacaoController(MovimentacaoService movimentacaoService) {
+    public MovimentacaoController(
+            MovimentacaoService movimentacaoService,
+            @Lazy UsuarioRepository usuarioRepository) {
         this.movimentacaoService = movimentacaoService;
+        this.usuarioRepository = usuarioRepository;
     }
 
     /**
@@ -82,8 +88,11 @@ public class MovimentacaoController {
             @Valid @RequestBody MovimentacaoRequest request,
             @AuthenticationPrincipal Long usuarioId,
             HttpServletRequest http) {
+        // Autor desnormalizado (V7/AD-SQ-45, CA-19): nome resolvido do PRINCIPAL (nunca do payload —
+        // §4.5), via projecao escalar, e repassado ao servico como snapshot do ledger.
+        String usuarioNome = usuarioId == null ? null : usuarioRepository.findNomeById(usuarioId);
         return ApiResponse.ok(
-                movimentacaoService.movimentar(produtoId, request, usuarioId),
+                movimentacaoService.movimentar(produtoId, request, usuarioId, usuarioNome),
                 http.getRequestURI());
     }
 

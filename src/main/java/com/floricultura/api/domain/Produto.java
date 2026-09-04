@@ -8,6 +8,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
+import org.hibernate.annotations.Formula;
 
 /**
  * Espelho fiel (SPEC-M2 §8) da tabela {@code produto} — schema V1 (SPEC-M0 §3.6) + coluna
@@ -70,6 +71,16 @@ public class Produto {
 
     @Column(name = "ativo", nullable = false)
     private boolean ativo;
+
+    /**
+     * {@code sazonal} = existe ao menos um vinculo N:N em {@code evento_produto} (M4/AD-SQ-44). Mapeado
+     * como {@link Formula} (subselect SQL <b>read-only</b>, NAO coluna) — o {@code ddl-auto=validate}
+     * cobra apenas colunas reais, entao isto <b>nao</b> exige uma coluna {@code sazonal} (que a V6
+     * dropou do stub). Booleano leve: uma unica query por pagina, sem materializar colecao nem o
+     * {@code bytea} de imagem (AD-SQ-38/FC-09). Somente leitura — nao ha setter.
+     */
+    @Formula("(exists (select 1 from evento_produto ep where ep.produto_id = id))")
+    private boolean sazonal;
 
     @Column(name = "criado_em", nullable = false, insertable = false, updatable = false)
     private Instant criadoEm;
@@ -167,6 +178,11 @@ public class Produto {
 
     public void setAtivo(boolean ativo) {
         this.ativo = ativo;
+    }
+
+    /** {@code true} se o produto tem ao menos um vinculo em {@code evento_produto} (@Formula, M4). */
+    public boolean isSazonal() {
+        return sazonal;
     }
 
     public Instant getCriadoEm() {

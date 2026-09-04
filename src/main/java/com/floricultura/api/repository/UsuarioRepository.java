@@ -5,6 +5,8 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -26,4 +28,12 @@ public interface UsuarioRepository extends JpaRepository<Usuario, Long> {
     long countByRoleAndAtivoTrue(String role);
 
     Page<Usuario> findByNomeContainingIgnoreCase(String nome, Pageable pageable);
+
+    /**
+     * Projecao escalar do nome do usuario para desnormalizar o autor da movimentacao (M4/T-M4-10,
+     * AD-SQ-45): resolve {@code usuario_nome} do {@code @AuthenticationPrincipal} no INSERT do ledger,
+     * sem carregar a entidade inteira. {@code null} se o id nao existir.
+     */
+    @Query("select u.nome from Usuario u where u.id = :id")
+    String findNomeById(@Param("id") Long id);
 }

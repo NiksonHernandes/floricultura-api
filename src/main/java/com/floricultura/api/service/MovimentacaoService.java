@@ -45,6 +45,9 @@ public class MovimentacaoService {
     private static final String SAIDA = "SAIDA";
     private static final String AJUSTE = "AJUSTE";
 
+    /** Ordenacao vazia: a lista global (§3.5) fixa {@code criado_em DESC} no proprio SQL nativo. */
+    private static final Sort SEM_ORDENACAO = Sort.unsorted();
+
     private final ProdutoRepository produtoRepository;
     private final MovimentacaoRepository movimentacaoRepository;
 
@@ -69,6 +72,19 @@ public class MovimentacaoService {
      */
     @Transactional
     public MovimentacaoResponse movimentar(Long produtoId, MovimentacaoRequest req, Long usuarioId) {
+        // Sobrecarga sem nome de autor (usado pelo teste de concorrencia direto): usuario_nome = null.
+        return movimentar(produtoId, req, usuarioId, null);
+    }
+
+    /**
+     * Variante com o <b>nome do autor</b> desnormalizado (V7/AD-SQ-45, CA-19): o {@code usuarioNome} e
+     * resolvido do {@code @AuthenticationPrincipal} pelo controller (via {@code
+     * UsuarioRepository.findNomeById}) e gravado como snapshot no ledger — <b>nunca</b> vem do payload
+     * (§4.5). Demais efeitos identicos a {@link #movimentar(Long, MovimentacaoRequest, Long)}.
+     */
+    @Transactional
+    public MovimentacaoResponse movimentar(
+            Long produtoId, MovimentacaoRequest req, Long usuarioId, String usuarioNome) {
         Produto produto = produtoRepository.findByIdForUpdate(produtoId)
                 .orElseThrow(ProdutoNaoEncontradoException::new);
 
@@ -88,7 +104,8 @@ public class MovimentacaoService {
                 quantidade,
                 resultante,
                 req.motivo(),
-                usuarioId);
+                usuarioId,
+                usuarioNome);
         mov = movimentacaoRepository.saveAndFlush(mov);
 
         // criado_em vem do DEFAULT now() do banco (coluna insertable=false) — projecao escalar le o
@@ -141,6 +158,22 @@ public class MovimentacaoService {
         Pageable pageable = PaginacaoParams.paraPageable(pagina, tamanho, ORDENACAO_HISTORICO);
         Page<MovimentacaoEstoque> page =
                 movimentacaoRepository.findByProdutoId(produtoId, pageable);
+        return PaginaResponse.de(page, MovimentacaoResponse::de);
+    }
+
+    /**
+     * Lista GLOBAL paginada do ledger (M4/T-M4-10, CA-22/CA-23 — §3.5/AD-SQ-46). Filtro {@code q}
+     * opcional casando {@code produto_nome} <b>OU</b> {@code usuario_nome} por {@code ILIKE '%q%'}
+     * (indices GIN trigram da V8); {@code q} vazio/em branco = sem filtro. Ordem {@code criado_em DESC}
+     * fixa no SQL nativo — o {@link Pageable} entra sem {@code Sort} (paginacao obrigatoria; range
+     * invalido → {@code 400} pelo helper §3.3). Legivel por USER+ADMIN (RBAC no catch-all, sem matcher).
+     */
+    @Transactional(readOnly = true)
+    public PaginaResponse<MovimentacaoResponse> buscarGlobal(
+            Integer pagina, Integer tamanho, String q) {
+        Pageable pageable = PaginacaoParams.paraPageable(pagina, tamanho, SEM_ORDENACAO);
+        String filtro = (q == null || q.isBlank()) ? null : q.trim();
+        Page<MovimentacaoEstoque> page = movimentacaoRepository.buscarGlobal(filtro, pageable);
         return PaginaResponse.de(page, MovimentacaoResponse::de);
     }
 }
