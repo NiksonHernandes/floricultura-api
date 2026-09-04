@@ -39,7 +39,7 @@ class V7V8MigrationTest {
     @Autowired
     private JdbcTemplate jdbc;
 
-    /** Flyway aplicou V7 e V8 com success=true; o head do historico chega a V8. */
+    /** Flyway aplicou V7 e V8 com success=true (o proposito do teste: efeito das duas migracoes). */
     @Test
     void flywayAplicouAteV8ComSucesso() {
         List<Map<String, Object>> rows = jdbc.queryForList(
@@ -50,11 +50,9 @@ class V7V8MigrationTest {
         assertThat(rows.get(0).get("success")).isEqualTo(Boolean.TRUE);
         assertThat(rows.get(1).get("version")).isEqualTo("8");
         assertThat(rows.get(1).get("success")).isEqualTo(Boolean.TRUE);
-
-        String head = jdbc.queryForObject(
-                "SELECT version FROM flyway_schema_history "
-                        + "WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1", String.class);
-        assertThat(head).isEqualTo("8");
+        // Head-pin removido (autorizacao direta do dono, M5): fixar "head == 8" mentia assim que a V9
+        // virou o novo head — e quebraria a cada migracao futura. Nao e o proposito deste teste, que
+        // afere o EFEITO de V7/V8; V3V4MigrationTest/V6MigrationTest tambem nao fixam head.
     }
 
     /** V7: coluna usuario_nome existe como varchar(120) anulavel (snapshot, sem backfill). */
