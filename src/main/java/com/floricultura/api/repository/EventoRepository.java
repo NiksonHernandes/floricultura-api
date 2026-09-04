@@ -1,9 +1,11 @@
 package com.floricultura.api.repository;
 
 import com.floricultura.api.domain.Evento;
+import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -17,4 +19,13 @@ import org.springframework.stereotype.Repository;
 public interface EventoRepository extends JpaRepository<Evento, Long> {
 
     Page<Evento> findByNomeContainingIgnoreCase(String nome, Pageable pageable);
+
+    /**
+     * Carrega TODOS os eventos para o calculo on-read de "proximos" (T-M4-7, §4.3). A varredura O(n) e
+     * <b>intencional</b> (tabela {@code evento} pequena; sem job/agendador — compativel com o cold start
+     * do host gratis, §9). Metodo dedicado (em vez de {@code findAll()}) para deixar o proposito
+     * explicito — a paginacao obrigatoria (CA-23) vale para a lista GLOBAL de movimentacoes, nao aqui.
+     */
+    @Query("select e from Evento e")
+    List<Evento> listarTodosParaAlerta();
 }

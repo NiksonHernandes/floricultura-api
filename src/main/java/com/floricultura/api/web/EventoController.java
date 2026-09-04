@@ -2,8 +2,10 @@ package com.floricultura.api.web;
 
 import com.floricultura.api.config.OpenApiConfig;
 import com.floricultura.api.service.DataEventoInvalidaException;
+import com.floricultura.api.service.EventoAlertaService;
 import com.floricultura.api.service.EventoNaoEncontradoException;
 import com.floricultura.api.service.EventoService;
+import com.floricultura.api.web.dto.EventoProximoResponse;
 import com.floricultura.api.web.dto.EventoRequest;
 import com.floricultura.api.web.dto.EventoResponse;
 import com.floricultura.api.web.dto.PaginaResponse;
@@ -60,9 +62,24 @@ import org.springframework.web.bind.annotation.RestController;
 public class EventoController {
 
     private final EventoService eventoService;
+    private final EventoAlertaService eventoAlertaService;
 
-    public EventoController(EventoService eventoService) {
+    public EventoController(
+            EventoService eventoService, EventoAlertaService eventoAlertaService) {
         this.eventoService = eventoService;
+        this.eventoAlertaService = eventoAlertaService;
+    }
+
+    /**
+     * CA-13..CA-17: lista os "proximos eventos" (janela {@code diasAte <= 60}), calculados on-read com
+     * {@code Clock} em {@code America/Sao_Paulo} (§4.3/§4.4), ja filtrados e ordenados por
+     * {@code proximaOcorrencia ASC, nome ASC}. USER+ADMIN (catch-all autenticado, sem matcher novo).
+     * Rota literal {@code /proximos} — precede {@code /{id}} na resolucao do Spring.
+     */
+    @Operation(summary = "Lista proximos eventos (janela 60d, on-read), ordem proximaOcorrencia ASC")
+    @GetMapping("/proximos")
+    public ApiResponse<List<EventoProximoResponse>> proximos(HttpServletRequest http) {
+        return ApiResponse.ok(eventoAlertaService.proximos(), http.getRequestURI());
     }
 
     /**
