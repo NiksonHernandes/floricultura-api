@@ -5,6 +5,7 @@ import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -29,4 +30,23 @@ public interface FornecedorRepository extends JpaRepository<Fornecedor, Long> {
     @Query(value = "SELECT produto_id FROM fornecedor_produto WHERE fornecedor_id = :id "
             + "ORDER BY produto_id", nativeQuery = true)
     List<Long> findProdutoIdsByFornecedorId(@Param("id") Long id);
+
+    // ----- Vinculo N:N fornecedor<->produto (M5/AD-SQ-44): replace-set por queries nativas. ---------
+
+    /**
+     * Apaga todos os vinculos do fornecedor (1o passo do replace-set — §3.5/§4.2). Roda dentro da
+     * transacao do {@code FornecedorProdutoVinculoService} (mesmo padrao de {@code removerVinculosDoProduto}).
+     */
+    @Modifying
+    @Query(value = "DELETE FROM fornecedor_produto WHERE fornecedor_id = :id", nativeQuery = true)
+    void removerVinculosDoFornecedor(@Param("id") Long id);
+
+    /**
+     * Insere um vinculo fornecedor<->produto (2o passo do replace-set — §3.5/§4.2). {@code ON CONFLICT DO
+     * NOTHING} torna a insercao idempotente para ids repetidos ja deduplicados no servico.
+     */
+    @Modifying
+    @Query(value = "INSERT INTO fornecedor_produto (fornecedor_id, produto_id) "
+            + "VALUES (:fornecedorId, :produtoId) ON CONFLICT DO NOTHING", nativeQuery = true)
+    void inserirVinculo(@Param("fornecedorId") Long fornecedorId, @Param("produtoId") Long produtoId);
 }

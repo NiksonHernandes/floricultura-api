@@ -3,6 +3,8 @@ package com.floricultura.api.web;
 import com.floricultura.api.config.OpenApiConfig;
 import com.floricultura.api.service.FornecedorNaoEncontradoException;
 import com.floricultura.api.service.FornecedorService;
+import com.floricultura.api.service.ProdutoInexistenteException;
+import com.floricultura.api.web.dto.FornecedorRequest;
 import com.floricultura.api.web.dto.FornecedorResponse;
 import com.floricultura.api.web.dto.PaginaResponse;
 import com.floricultura.api.web.dto.ParametroPaginacaoInvalidoException;
@@ -13,13 +15,20 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import java.util.List;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -37,12 +46,18 @@ import org.springframework.web.bind.annotation.RestController;
  *       invalido → 400.</li>
  *   <li>{@code GET /api/v1/fornecedores/{id}} — 200 detalhe (com {@code produtoIds}); 404 se
  *       inexistente.</li>
+ *   <li>{@code POST /api/v1/fornecedores} — 201 {@link FornecedorResponse} (ADMIN); 400 validacao/{@code
+ *       produtoIds}; 403 USER; 401 s/ token.</li>
+ *   <li>{@code PUT /api/v1/fornecedores/{id}} — 200 atualizado (replace-set §4.2); 400/403; 404
+ *       inexistente.</li>
+ *   <li>{@code DELETE /api/v1/fornecedores/{id}} — 204 (hard delete, cascade limpa {@code
+ *       fornecedor_produto}); 403 USER; 404 inexistente.</li>
  * </ul>
  */
 @RestController
 @RequestMapping("/api/v1/fornecedores")
 @Tag(name = "fornecedores", description = "Cadastro de fornecedores (LGPD): leitura (USER+ADMIN) "
-        + "paginada e detalhe com produtoIds")
+        + "paginada/detalhe e escrita (ADMIN) criar/atualizar/excluir com replace-set de produtoIds")
 @SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 public class FornecedorController {
 
@@ -76,7 +91,57 @@ public class FornecedorController {
         return ApiResponse.ok(fornecedorService.detalhar(id), http.getRequestURI());
     }
 
+    /**
+     * CA-4: cria fornecedor (ADMIN) → 201 com {@link FornecedorResponse} ({@code produtoIds} preenchido).
+     * Payload invalido ({@code nome} vazio, {@code email} malformado) → 400; {@code produtoIds} com id
+     * inexistente → 400 {@code field=produtoIds} (handler local, nada persiste). USER → 403; sem token →
+     * 401 (SecurityConfig, matchers §3.4).
+     */
+    @Operation(summary = "Cria fornecedor (ADMIN) → 201; produtoId inexistente → 400 field=produtoIds")
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<FornecedorResponse> criar(
+            @Valid @RequestBody FornecedorRequest request, HttpServletRequest http) {
+        return ApiResponse.ok(fornecedorService.criar(request), http.getRequestURI());
+    }
+
+    /**
+     * CA-5/CA-7: atualiza fornecedor (ADMIN) → 200 com os campos atualizados e replace-set dos vinculos
+     * (§4.2 — {@code produtoIds} ausente preserva). Payload invalido → 400; {@code produtoIds} inexistente
+     * → 400; inexistente → 404 (handler local); USER → 403 (SecurityConfig).
+     */
+    @Operation(summary = "Atualiza fornecedor (ADMIN) → 200, replace-set de produtoIds (404 se inexistente)")
+    @PutMapping("/{id}")
+    public ApiResponse<FornecedorResponse> atualizar(
+            @PathVariable Long id,
+            @Valid @RequestBody FornecedorRequest request,
+            HttpServletRequest http) {
+        return ApiResponse.ok(fornecedorService.atualizar(id, request), http.getRequestURI());
+    }
+
+    /**
+     * CA-6: hard delete de fornecedor (ADMIN) → 204 sem corpo (FC-08). O {@code ON DELETE CASCADE} da V9
+     * limpa os vinculos em {@code fornecedor_produto}; os produtos permanecem. Inexistente → 404 (handler
+     * local); USER → 403 (SecurityConfig). A confirmacao e do front; o back so executa.
+     */
+    @Operation(summary = "Hard delete de fornecedor (ADMIN) → 204 (404 se inexistente)")
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void excluir(@PathVariable Long id) {
+        fornecedorService.excluir(id);
+    }
+
     // ---- Handlers locais (nao tocam o GlobalExceptionHandler do M0 — §8) ----------------------
+
+    /** 400 VALIDATION_ERROR para {@code produtoIds} com id inexistente (CA-8), nada persiste. */
+    @ExceptionHandler(ProdutoInexistenteException.class)
+    public ResponseEntity<ApiResponse<Object>> handleProdutoInexistente(
+            ProdutoInexistenteException ex, HttpServletRequest http) {
+        ApiError error = new ApiError(
+                ErrorCode.VALIDATION_ERROR.name(), ex.getMessage(), ex.getDetails());
+        return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.status())
+                .body(ApiResponse.fail(error, http.getRequestURI()));
+    }
 
     /** 400 VALIDATION_ERROR para {@code pagina}/{@code tamanho} fora do contrato §3.4 (CA-1). */
     @ExceptionHandler(ParametroPaginacaoInvalidoException.class)
