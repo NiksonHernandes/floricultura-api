@@ -10,6 +10,7 @@ import com.floricultura.api.web.dto.EventoRequest;
 import com.floricultura.api.web.dto.EventoResponse;
 import com.floricultura.api.web.dto.PaginaResponse;
 import com.floricultura.api.web.dto.ParametroPaginacaoInvalidoException;
+import com.floricultura.api.web.dto.ProdutoResponse;
 import com.floricultura.api.web.error.ErrorCode;
 import com.floricultura.api.web.response.ApiError;
 import com.floricultura.api.web.response.ApiResponse;
@@ -102,6 +103,24 @@ public class EventoController {
     @GetMapping("/{id}")
     public ApiResponse<EventoResponse> detalhar(@PathVariable Long id, HttpServletRequest http) {
         return ApiResponse.ok(eventoService.detalhar(id), http.getRequestURI());
+    }
+
+    /**
+     * T-M4.1-1/CA-1/CA-2 (vitrine — SPEC-M4.1 §3.1): lista paginada dos produtos vinculados ao evento
+     * {@code {id}} (N:N {@code evento_produto}), ordem {@code nome ASC}. USER+ADMIN (catch-all
+     * autenticado, sem matcher novo). Evento inexistente → 404 (handler local); paginacao invalida →
+     * 400; sem token → 401. Cada item vem na variante de lista ({@code eventoIds=null}, sem {@code
+     * bytea} — AD-SQ-38) com {@code sazonal=true} fixo.
+     */
+    @Operation(summary = "Lista produtos vinculados ao evento (vitrine), paginado, ordem nome ASC")
+    @GetMapping("/{id}/produtos")
+    public ApiResponse<PaginaResponse<ProdutoResponse>> produtosDoEvento(
+            @PathVariable Long id,
+            @RequestParam(required = false) Integer pagina,
+            @RequestParam(required = false) Integer tamanho,
+            HttpServletRequest http) {
+        return ApiResponse.ok(
+                eventoService.listarProdutos(id, pagina, tamanho), http.getRequestURI());
     }
 
     /**

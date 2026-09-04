@@ -82,6 +82,29 @@ public interface ProdutoRepository extends JpaRepository<Produto, Long> {
             + "ORDER BY evento_id", nativeQuery = true)
     List<Long> findEventoIdsByProdutoId(@Param("produtoId") Long produtoId);
 
+    /**
+     * Produtos vinculados a um evento, paginados (vitrine — SPEC-M4.1 §3.1/§4.1, T-M4.1-1). Query
+     * <b>nativa</b> com {@code JOIN evento_produto} + {@code countQuery} equivalente; o {@code ORDER BY}
+     * ({@code nome ASC}) vem do {@link Pageable} montado no servico.
+     *
+     * <p><b>Desvio deliberado do {@code SELECT p.*} do §3.1</b> (justificado pela ancora #3/AD-SQ-38):
+     * as colunas sao <b>enumeradas</b> para <b>excluir o {@code imagem} BYTEA</b> — {@code p.*} arrastaria
+     * o binario ao {@code ResultSet}, violando o invariante "leitura nunca materializa o bytea". A
+     * @Entity exige que a coluna do {@code @Formula sazonal} exista no {@code ResultSet} sob query nativa;
+     * como todo item do JOIN e, por definicao, vinculado, projeta-se a constante {@code TRUE AS sazonal}
+     * (nao se replica o subselect do {@code @Formula} — §12/PA#2) e o servico ainda fixa {@code true} no
+     * mapeamento. Aliases casam os {@code @Column} da @Entity (hidratacao por nome).
+     */
+    @Query(value = "SELECT p.id, p.nome, p.descricao, p.unidade_medida, p.estoque_minimo, "
+            + "p.estoque_atual, p.preco, p.imagem_url, p.imagem_content_type, p.imagem_filename, "
+            + "p.ativo, p.criado_em, p.atualizado_em, TRUE AS sazonal "
+            + "FROM produto p JOIN evento_produto ep ON ep.produto_id = p.id "
+            + "WHERE ep.evento_id = :eventoId",
+            countQuery = "SELECT count(*) FROM produto p JOIN evento_produto ep "
+                    + "ON ep.produto_id = p.id WHERE ep.evento_id = :eventoId",
+            nativeQuery = true)
+    Page<Produto> buscarPorEvento(@Param("eventoId") Long eventoId, Pageable pageable);
+
     /** Apaga todos os vinculos do produto (1o passo do replace-set — §4.2). */
     @Modifying
     @Query(value = "DELETE FROM evento_produto WHERE produto_id = :produtoId", nativeQuery = true)
