@@ -123,23 +123,45 @@ public interface ProdutoRepository extends JpaRepository<Produto, Long> {
     // ----- NOME, colunas enumeradas (sem bytea/AD-SQ-38), JOIN na tabela VIVA (nome atual; cadastro
     // ----- hard-deletado sai por id nulo no ledger -> INNER JOIN nao casa -> id sempre nao-nulo). -----
 
-    /** Eventos vinculados ao produto (via evento_produto/AD-SQ-44), ordenados por nome. */
+    /**
+     * Eventos vinculados ao produto (via evento_produto/AD-SQ-44) — os <b>3 mais recentemente
+     * cadastrados</b> (M5.1/HISTORIA #6, T-M5.1-7, AD-SQ-73). <b>Decisao consciente (proxy):</b> a
+     * juncao {@code evento_produto} e PK {@code (produto_id, evento_id)} <b>sem coluna de data</b> — nao
+     * ha timestamp do vinculo. Usa-se {@code e.id DESC} como PROXY de recencia de cadastro ({@code id} e
+     * monotono/serial ≈ ordem de criacao), com {@code e.nome ASC} como desempate estavel, e {@code LIMIT
+     * 3}. Nao e "os 3 mais iminentes" (por data do evento) — se o dono quiser proximidade, e decisao
+     * maior (duplicaria AD-SQ-47) e deve ser escalada, nao improvisada aqui.
+     */
     @Query(value = "SELECT e.id AS id, e.nome AS nome FROM evento_produto ep "
-            + "JOIN evento e ON e.id = ep.evento_id WHERE ep.produto_id = :id ORDER BY e.nome",
+            + "JOIN evento e ON e.id = ep.evento_id WHERE ep.produto_id = :id "
+            + "ORDER BY e.id DESC, e.nome ASC LIMIT 3",
             nativeQuery = true)
     List<ReferenciaSimplesProjection> findEventosRelacionados(@Param("id") Long id);
 
-    /** Fornecedores das ENTRADAS deste produto (DISTINCT), ordenados por nome. */
-    @Query(value = "SELECT DISTINCT f.id AS id, f.nome AS nome FROM movimentacao_estoque m "
+    /**
+     * Fornecedores das ENTRADAS deste produto — os <b>3 com a movimentacao mais recente</b>
+     * (M5.1/HISTORIA #6, T-M5.1-7, AD-SQ-73). Agrupa por {@code (f.id, f.nome)} (equivale ao DISTINCT
+     * anterior) e ordena por {@code MAX(m.criado_em) DESC} (recencia real da ENTRADA no ledger), com
+     * {@code f.nome ASC} como desempate estavel, e {@code LIMIT 3}. {@code criado_em} e {@code NOT NULL}
+     * (V1 baseline, indexado em {@code ix_mov_criado_em}).
+     */
+    @Query(value = "SELECT f.id AS id, f.nome AS nome FROM movimentacao_estoque m "
             + "JOIN fornecedor f ON f.id = m.fornecedor_id "
-            + "WHERE m.produto_id = :id AND m.tipo = 'ENTRADA' ORDER BY f.nome",
+            + "WHERE m.produto_id = :id AND m.tipo = 'ENTRADA' "
+            + "GROUP BY f.id, f.nome ORDER BY MAX(m.criado_em) DESC, f.nome ASC LIMIT 3",
             nativeQuery = true)
     List<ReferenciaSimplesProjection> findFornecedoresRelacionados(@Param("id") Long id);
 
-    /** Clientes das SAIDAS deste produto (DISTINCT), ordenados por nome. */
-    @Query(value = "SELECT DISTINCT c.id AS id, c.nome AS nome FROM movimentacao_estoque m "
+    /**
+     * Clientes das SAIDAS deste produto — os <b>3 com a movimentacao mais recente</b> (M5.1/HISTORIA #6,
+     * T-M5.1-7, AD-SQ-73). Espelha {@code findFornecedoresRelacionados}: agrupa por {@code (c.id,
+     * c.nome)} e ordena por {@code MAX(m.criado_em) DESC} (recencia real da SAIDA no ledger), com
+     * {@code c.nome ASC} como desempate, e {@code LIMIT 3}.
+     */
+    @Query(value = "SELECT c.id AS id, c.nome AS nome FROM movimentacao_estoque m "
             + "JOIN cliente c ON c.id = m.cliente_id "
-            + "WHERE m.produto_id = :id AND m.tipo = 'SAIDA' ORDER BY c.nome",
+            + "WHERE m.produto_id = :id AND m.tipo = 'SAIDA' "
+            + "GROUP BY c.id, c.nome ORDER BY MAX(m.criado_em) DESC, c.nome ASC LIMIT 3",
             nativeQuery = true)
     List<ReferenciaSimplesProjection> findClientesRelacionados(@Param("id") Long id);
 }
