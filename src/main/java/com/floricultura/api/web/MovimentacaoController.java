@@ -2,6 +2,7 @@ package com.floricultura.api.web;
 
 import com.floricultura.api.config.OpenApiConfig;
 import com.floricultura.api.repository.UsuarioRepository;
+import com.floricultura.api.service.ContraparteInvalidaException;
 import com.floricultura.api.service.EstoqueInsuficienteException;
 import com.floricultura.api.service.MovimentacaoService;
 import com.floricultura.api.service.ProdutoNaoEncontradoException;
@@ -125,6 +126,17 @@ public class MovimentacaoController {
     @ExceptionHandler(QuantidadeInvalidaException.class)
     public ResponseEntity<ApiResponse<Object>> handleQuantidadeInvalida(
             QuantidadeInvalidaException ex, HttpServletRequest http) {
+        return respostaValidacao(ex.getMessage(), ex.getDetails(), http);
+    }
+
+    /**
+     * 400 VALIDATION_ERROR: contraparte invalida (V10/AD-SQ-64, R-CA-3/4/5) — tipo errado ou
+     * fornecedor/cliente inexistente; {@code details} no campo {@code fornecedorId}/{@code clienteId},
+     * nada persiste.
+     */
+    @ExceptionHandler(ContraparteInvalidaException.class)
+    public ResponseEntity<ApiResponse<Object>> handleContraparteInvalida(
+            ContraparteInvalidaException ex, HttpServletRequest http) {
         return respostaValidacao(ex.getMessage(), ex.getDetails(), http);
     }
 

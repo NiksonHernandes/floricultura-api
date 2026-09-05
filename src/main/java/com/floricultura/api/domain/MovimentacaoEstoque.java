@@ -26,6 +26,13 @@ import java.time.Instant;
  * usuario; {@code null} em linhas historicas pre-V7). {@code tipo} e {@code String} (mirror da V1
  * {@code VARCHAR(20)} CHECK ENTRADA/SAIDA/AJUSTE). {@code criadoEm} e {@code insertable=false,
  * updatable=false} (valor do {@code DEFAULT now()}).
+ *
+ * <p><b>Contraparte (V10/AD-SQ-64, RB-3):</b> {@code fornecedorId}/{@code clienteId} (FK anulavel
+ * {@code ON DELETE SET NULL}) + os snapshots {@code fornecedorNome}/{@code clienteNome} (VARCHAR(150)),
+ * mesmos escalares simples do padrao {@code usuarioNome} — o hard delete LGPD (FC-08) do cadastro anula
+ * o {@code *_id} (cascade) e <b>preserva</b> o {@code *_nome} (a trigger V10 tolera essa anulacao e
+ * mantem os snapshots imutaveis). ENTRADA pode ter fornecedor; SAIDA pode ter cliente; AJUSTE nenhum
+ * (CHECK {@code ck_mov_*_tipo} + validacao do servico com {@code field}).
  */
 @Entity
 @Table(name = "movimentacao_estoque")
@@ -58,6 +65,18 @@ public class MovimentacaoEstoque {
 
     @Column(name = "usuario_nome", length = 120)
     private String usuarioNome;
+
+    @Column(name = "fornecedor_id")
+    private Long fornecedorId;
+
+    @Column(name = "fornecedor_nome", length = 150)
+    private String fornecedorNome;
+
+    @Column(name = "cliente_id")
+    private Long clienteId;
+
+    @Column(name = "cliente_nome", length = 150)
+    private String clienteNome;
 
     @Column(name = "criado_em", nullable = false, insertable = false, updatable = false)
     private Instant criadoEm;
@@ -136,6 +155,38 @@ public class MovimentacaoEstoque {
 
     public void setUsuarioNome(String usuarioNome) {
         this.usuarioNome = usuarioNome;
+    }
+
+    public Long getFornecedorId() {
+        return fornecedorId;
+    }
+
+    public void setFornecedorId(Long fornecedorId) {
+        this.fornecedorId = fornecedorId;
+    }
+
+    public String getFornecedorNome() {
+        return fornecedorNome;
+    }
+
+    public void setFornecedorNome(String fornecedorNome) {
+        this.fornecedorNome = fornecedorNome;
+    }
+
+    public Long getClienteId() {
+        return clienteId;
+    }
+
+    public void setClienteId(Long clienteId) {
+        this.clienteId = clienteId;
+    }
+
+    public String getClienteNome() {
+        return clienteNome;
+    }
+
+    public void setClienteNome(String clienteNome) {
+        this.clienteNome = clienteNome;
     }
 
     public Instant getCriadoEm() {

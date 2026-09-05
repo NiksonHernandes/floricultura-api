@@ -23,6 +23,12 @@ import java.time.Instant;
  * @param usuarioId            id do autor (do {@code @AuthenticationPrincipal}; pode ser {@code null})
  * @param usuarioNome          snapshot do nome do autor (V7/AD-SQ-45; {@code null} em linhas historicas
  *                             pre-V7 ou autor desconhecido — front exibe "—")
+ * @param fornecedorId         contraparte fornecedor (V10/AD-SQ-64; {@code null} sem contraparte ou apos
+ *                             hard delete do cadastro — o {@code fornecedorNome} sobrevive)
+ * @param fornecedorNome       snapshot do nome do fornecedor ({@code null} sem contraparte)
+ * @param clienteId            contraparte cliente (V10/AD-SQ-64; {@code null} sem contraparte ou apos
+ *                             hard delete do cadastro — o {@code clienteNome} sobrevive)
+ * @param clienteNome          snapshot do nome do cliente ({@code null} sem contraparte)
  * @param criadoEm             instante de criacao (UTC ISO-8601), do {@code DEFAULT now()} do banco
  */
 public record MovimentacaoResponse(
@@ -35,6 +41,10 @@ public record MovimentacaoResponse(
         String motivo,
         Long usuarioId,
         String usuarioNome,
+        Long fornecedorId,
+        String fornecedorNome,
+        Long clienteId,
+        String clienteNome,
         Instant criadoEm) {
 
     /**
@@ -61,6 +71,10 @@ public record MovimentacaoResponse(
                 mov.getMotivo(),
                 mov.getUsuarioId(),
                 mov.getUsuarioNome(),
+                mov.getFornecedorId(),
+                mov.getFornecedorNome(),
+                mov.getClienteId(),
+                mov.getClienteNome(),
                 criadoEm);
     }
 }

@@ -14,9 +14,9 @@ import java.time.Instant;
  * deve <b>casar exatamente</b> a V9 (§12) — as colunas {@code tipo_pessoa}/{@code documento}/{@code
  * endereco} foram <b>dropadas</b> pela V9 e por isso <b>nao</b> aparecem aqui.
  *
- * <p><b>Nao</b> mapeia a colecao de vinculos {@code cliente_produto} (N:N): o vinculo e lido/escrito por
- * query nativa dedicada (mesmo padrao de {@code Produto}↔{@code evento_produto}, AD-SQ-44) — a lista
- * nunca materializa a colecao (§3.3/§4.2).
+ * <p><b>Nao</b> mapeia colecao de vinculos: na revisao 2026-09-04 (AD-SQ-65) o vinculo cliente↔produto
+ * deixou de ser junção N:N editavel e passou a ser <b>derivado da movimentacao</b> (SAIDAS). A lista
+ * nunca materializa o vinculo (AD-SQ-38); o {@code produtoIds} derivado do detalhe volta em RB-3/RB-4.
  *
  * <p>{@code criadoEm} e {@code insertable=false, updatable=false} (valor do {@code DEFAULT now()}).
  * {@code atualizadoEm} e {@code insertable=false, updatable=true}: o banco seta no insert e o servico

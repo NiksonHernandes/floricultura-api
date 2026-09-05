@@ -3,7 +3,6 @@ package com.floricultura.api.web;
 import com.floricultura.api.config.OpenApiConfig;
 import com.floricultura.api.service.ClienteNaoEncontradoException;
 import com.floricultura.api.service.ClienteService;
-import com.floricultura.api.service.ProdutoInexistenteException;
 import com.floricultura.api.web.dto.ClienteRequest;
 import com.floricultura.api.web.dto.ClienteResponse;
 import com.floricultura.api.web.dto.PaginaResponse;
@@ -43,18 +42,20 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>{@code GET /api/v1/clientes} — 200 {@link PaginaResponse} (params {@code pagina}/{@code
  *       tamanho}/{@code nome}), ordem {@code nome ASC}, itens com {@code produtoIds=null}; range
  *       invalido → 400.</li>
- *   <li>{@code GET /api/v1/clientes/{id}} — 200 detalhe (com {@code produtoIds}); 404 se inexistente.</li>
- *   <li>{@code POST /api/v1/clientes} — 201 {@link ClienteResponse} (ADMIN); 400 validacao/{@code
- *       produtoIds}; 403 USER; 401 s/ token.</li>
- *   <li>{@code PUT /api/v1/clientes/{id}} — 200 atualizado (replace-set §4.2); 400/403; 404 inexistente.</li>
- *   <li>{@code DELETE /api/v1/clientes/{id}} — 204 (hard delete, cascade limpa {@code cliente_produto});
- *       403 USER; 404 inexistente.</li>
+ *   <li>{@code GET /api/v1/clientes/{id}} — 200 detalhe; 404 se inexistente.</li>
+ *   <li>{@code POST /api/v1/clientes} — 201 {@link ClienteResponse} (ADMIN); 400 validacao; 403 USER;
+ *       401 s/ token.</li>
+ *   <li>{@code PUT /api/v1/clientes/{id}} — 200 atualizado; 400/403; 404 inexistente.</li>
+ *   <li>{@code DELETE /api/v1/clientes/{id}} — 204 (hard delete); 403 USER; 404 inexistente.</li>
  * </ul>
+ *
+ * <p><b>Revisao 2026-09-04 (AD-SQ-65):</b> o vinculo cliente↔produto deixou de ser junção N:N editavel
+ * pelo cadastro; nao ha mais {@code produtoIds} de escrita nem replace-set.
  */
 @RestController
 @RequestMapping("/api/v1/clientes")
 @Tag(name = "clientes", description = "Cadastro de clientes (LGPD): leitura (USER+ADMIN) paginada/detalhe "
-        + "e escrita (ADMIN) criar/atualizar/excluir com replace-set de produtoIds")
+        + "e escrita (ADMIN) criar/atualizar/excluir")
 @SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 public class ClienteController {
 
@@ -80,20 +81,18 @@ public class ClienteController {
         return ApiResponse.ok(clienteService.listar(pagina, tamanho, nome), http.getRequestURI());
     }
 
-    /** CA-2: detalha cliente por id (com {@code produtoIds}); inexistente → 404. */
-    @Operation(summary = "Detalha cliente por id, com produtoIds (404 se inexistente)")
+    /** CA-2: detalha cliente por id; inexistente → 404. */
+    @Operation(summary = "Detalha cliente por id (404 se inexistente)")
     @GetMapping("/{id}")
     public ApiResponse<ClienteResponse> detalhar(@PathVariable Long id, HttpServletRequest http) {
         return ApiResponse.ok(clienteService.detalhar(id), http.getRequestURI());
     }
 
     /**
-     * CA-4: cria cliente (ADMIN) → 201 com {@link ClienteResponse} ({@code produtoIds} preenchido).
-     * Payload invalido ({@code nome} vazio, {@code email} malformado) → 400; {@code produtoIds} com id
-     * inexistente → 400 {@code field=produtoIds} (handler local, nada persiste). USER → 403; sem token →
-     * 401 (SecurityConfig, matchers §3.4).
+     * CA-4: cria cliente (ADMIN) → 201 com {@link ClienteResponse}. Payload invalido ({@code nome} vazio,
+     * {@code email} malformado) → 400. USER → 403; sem token → 401 (SecurityConfig, matchers §3.4).
      */
-    @Operation(summary = "Cria cliente (ADMIN) → 201; produtoId inexistente → 400 field=produtoIds")
+    @Operation(summary = "Cria cliente (ADMIN) → 201")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ClienteResponse> criar(
@@ -102,11 +101,10 @@ public class ClienteController {
     }
 
     /**
-     * CA-5/CA-7: atualiza cliente (ADMIN) → 200 com os campos atualizados e replace-set dos vinculos
-     * (§4.2 — {@code produtoIds} ausente preserva). Payload invalido → 400; {@code produtoIds} inexistente
-     * → 400; inexistente → 404 (handler local); USER → 403 (SecurityConfig).
+     * CA-5: atualiza cliente (ADMIN) → 200 com os campos atualizados. Payload invalido → 400; inexistente
+     * → 404 (handler local); USER → 403 (SecurityConfig).
      */
-    @Operation(summary = "Atualiza cliente (ADMIN) → 200, replace-set de produtoIds (404 se inexistente)")
+    @Operation(summary = "Atualiza cliente (ADMIN) → 200 (404 se inexistente)")
     @PutMapping("/{id}")
     public ApiResponse<ClienteResponse> atualizar(
             @PathVariable Long id,
@@ -116,9 +114,8 @@ public class ClienteController {
     }
 
     /**
-     * CA-6: hard delete de cliente (ADMIN) → 204 sem corpo (FC-08). O {@code ON DELETE CASCADE} da V9
-     * limpa os vinculos em {@code cliente_produto}; os produtos permanecem. Inexistente → 404 (handler
-     * local); USER → 403 (SecurityConfig). A confirmacao e do front; o back so executa.
+     * CA-6: hard delete de cliente (ADMIN) → 204 sem corpo (FC-08). Os produtos permanecem. Inexistente →
+     * 404 (handler local); USER → 403 (SecurityConfig). A confirmacao e do front; o back so executa.
      */
     @Operation(summary = "Hard delete de cliente (ADMIN) → 204 (404 se inexistente)")
     @DeleteMapping("/{id}")
@@ -128,16 +125,6 @@ public class ClienteController {
     }
 
     // ---- Handlers locais (nao tocam o GlobalExceptionHandler do M0 — §8) ----------------------
-
-    /** 400 VALIDATION_ERROR para {@code produtoIds} com id inexistente (CA-8), nada persiste. */
-    @ExceptionHandler(ProdutoInexistenteException.class)
-    public ResponseEntity<ApiResponse<Object>> handleProdutoInexistente(
-            ProdutoInexistenteException ex, HttpServletRequest http) {
-        ApiError error = new ApiError(
-                ErrorCode.VALIDATION_ERROR.name(), ex.getMessage(), ex.getDetails());
-        return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.status())
-                .body(ApiResponse.fail(error, http.getRequestURI()));
-    }
 
     /** 400 VALIDATION_ERROR para {@code pagina}/{@code tamanho} fora do contrato §3.4 (CA-1). */
     @ExceptionHandler(ParametroPaginacaoInvalidoException.class)

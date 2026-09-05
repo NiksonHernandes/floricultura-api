@@ -4,11 +4,14 @@ import com.floricultura.api.domain.Produto;
 import com.floricultura.api.domain.ProdutoFactory;
 import com.floricultura.api.repository.EventoRepository;
 import com.floricultura.api.repository.ProdutoRepository;
+import com.floricultura.api.repository.ReferenciaSimplesProjection;
 import com.floricultura.api.web.dto.AtualizarProdutoRequest;
 import com.floricultura.api.web.dto.CriarProdutoRequest;
 import com.floricultura.api.web.dto.PaginaResponse;
 import com.floricultura.api.web.dto.PaginacaoParams;
+import com.floricultura.api.web.dto.ProdutoRelacionamentosResponse;
 import com.floricultura.api.web.dto.ProdutoResponse;
+import com.floricultura.api.web.dto.ReferenciaSimples;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.context.annotation.Lazy;
@@ -72,6 +75,28 @@ public class ProdutoService {
                 .orElseThrow(ProdutoNaoEncontradoException::new);
         // Detalhe (§3.4/CA-9): carrega os eventoIds vinculados (na lista vem null, evita N+1).
         return ProdutoResponse.deDetalhe(produto, produtoRepository.findEventoIdsByProdutoId(id));
+    }
+
+    /**
+     * Relacionamentos <b>derivados</b> do produto (M5-revisao/AD-SQ-66, §R3.5, R-CA-10) para o
+     * "visualizar produto": eventos vinculados ({@code evento_produto}), fornecedores das ENTRADAS e
+     * clientes das SAIDAS — todos por <b>nome</b>, read-only, sem bytea (AD-SQ-38). Inexistente →
+     * {@link ProdutoNaoEncontradoException} (404). O JOIN na tabela viva devolve o nome atual e omite
+     * cadastros hard-deletados (id nulo no ledger nao casa o INNER JOIN — §R3.5).
+     */
+    @Transactional(readOnly = true)
+    public ProdutoRelacionamentosResponse relacionamentos(Long id) {
+        if (!produtoRepository.existsById(id)) {
+            throw new ProdutoNaoEncontradoException();
+        }
+        return new ProdutoRelacionamentosResponse(
+                mapearReferencias(produtoRepository.findEventosRelacionados(id)),
+                mapearReferencias(produtoRepository.findFornecedoresRelacionados(id)),
+                mapearReferencias(produtoRepository.findClientesRelacionados(id)));
+    }
+
+    private static List<ReferenciaSimples> mapearReferencias(List<ReferenciaSimplesProjection> proj) {
+        return proj.stream().map(p -> new ReferenciaSimples(p.getId(), p.getNome())).toList();
     }
 
     /**

@@ -8,6 +8,7 @@ import com.floricultura.api.web.dto.AtualizarProdutoRequest;
 import com.floricultura.api.web.dto.CriarProdutoRequest;
 import com.floricultura.api.web.dto.PaginaResponse;
 import com.floricultura.api.web.dto.ParametroPaginacaoInvalidoException;
+import com.floricultura.api.web.dto.ProdutoRelacionamentosResponse;
 import com.floricultura.api.web.dto.ProdutoResponse;
 import com.floricultura.api.web.error.ErrorCode;
 import com.floricultura.api.web.response.ApiError;
@@ -94,6 +95,18 @@ public class ProdutoController {
     public ApiResponse<ProdutoResponse> detalhar(
             @PathVariable Long id, HttpServletRequest http) {
         return ApiResponse.ok(produtoService.detalhar(id), http.getRequestURI());
+    }
+
+    /**
+     * R-CA-10 (M5-revisao/AD-SQ-66, §R3.5): relacionamentos derivados do produto (eventos/fornecedores/
+     * clientes por nome) para o "visualizar produto". Leitura autenticada (USER+ADMIN via catch-all —
+     * <b>sem matcher novo</b>); inexistente → 404 (handler local).
+     */
+    @Operation(summary = "Relacionamentos derivados do produto (eventos/fornecedores/clientes por nome)")
+    @GetMapping("/{id}/relacionamentos")
+    public ApiResponse<ProdutoRelacionamentosResponse> relacionamentos(
+            @PathVariable Long id, HttpServletRequest http) {
+        return ApiResponse.ok(produtoService.relacionamentos(id), http.getRequestURI());
     }
 
     /**

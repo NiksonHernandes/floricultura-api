@@ -7,11 +7,10 @@ package com.floricultura.api.domain;
  * <b>sem alterar a entity</b> (mesma convencao de {@code EventoFactory}/{@code ProdutoFactory}).
  *
  * <p>{@code criado_em}/{@code atualizado_em} <b>nao</b> sao setados aqui: vem do {@code DEFAULT now()}
- * do banco (colunas {@code insertable=false}). Os vinculos N:N {@code produtoIds} sao aplicados por
- * query nativa dedicada no {@code FornecedorProdutoVinculoService} (T-M5-5), nao pela fabrica.
+ * do banco (colunas {@code insertable=false}). O vinculo fornecedor↔produto e derivado da movimentacao
+ * (AD-SQ-65), nao escrito pelo cadastro.
  */
 public final class FornecedorFactory {
-
     private FornecedorFactory() {
         // Utilitaria — sem instancia.
     }

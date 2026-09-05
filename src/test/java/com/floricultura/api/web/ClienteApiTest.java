@@ -25,9 +25,11 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * Integracao da LEITURA de clientes do M5 (T-M5-2, CA-1/CA-2/CA-3 — SPEC-M5 §3.4) contra um PostgreSQL
  * de DESCARTE (Testcontainers postgres:16), com {@code ClienteController}/{@code ClienteService} e filtro
  * JWT reais. Prova a lista paginada ordenada {@code nome ASC} + filtro {@code ILIKE} + paginacao invalida
- * (400), o detalhe com {@code produtoIds} + 404, e o invariante de que a lista <b>nao</b> materializa o
- * vinculo ({@code produtoIds=null} nos itens). Dados ficticios (LGPD): "Maria Flores" / {@code
- * @exemplo.com.br}.
+ * (400), o detalhe (200/404) e o invariante de que a lista <b>nao</b> materializa o vinculo
+ * ({@code produtoIds} ausente nos itens). Dados ficticios (LGPD): "Maria Flores" / {@code @exemplo.com.br}.
+ *
+ * <p><b>Revisao 2026-09-04 (AD-SQ-65/R-CA-7):</b> o vinculo cliente↔produto e derivado da movimentacao —
+ * o {@code produtoIds} do detalhe vem das SAIDAS deste cliente (V10); a LISTA nunca o materializa.
  *
  * <p>Nome {@code *Test} (Surefire): integracoes Testcontainers usam {@code *Test}. Segredos de teste sao
  * NAO-segredos (BCrypt de {@link UUID} de runtime).
@@ -63,8 +65,11 @@ class ClienteApiTest {
 
     @BeforeEach
     void seed() {
-        jdbc.update("DELETE FROM cliente_produto");
+        // TRUNCATE do ledger ANTES de apagar cliente/produto: com linhas no ledger, o DELETE dispararia
+        // o cascade SET NULL (UPDATE) que a trigger de imutabilidade barra. Vazio = DELETE seguro.
+        jdbc.update("TRUNCATE TABLE movimentacao_estoque");
         jdbc.update("DELETE FROM cliente");
+        jdbc.update("DELETE FROM produto");
         jdbc.update("DELETE FROM usuario");
         Long userId = inserirUsuario("user-cliente@floricultura.local", "USER");
         userBearer = "Bearer " + jwtService.gerarToken(userId);
@@ -88,6 +93,14 @@ class ClienteApiTest {
         return jdbc.queryForObject(
                 "INSERT INTO produto (nome, unidade_medida) VALUES (?, 'un') RETURNING id",
                 Long.class, nome);
+    }
+
+    /** Insere uma SAIDA no ledger vinculando produto↔cliente (fonte do produtoIds derivado — §R3.4). */
+    private void inserirSaida(Long clienteId, Long produtoId) {
+        jdbc.update("INSERT INTO movimentacao_estoque "
+                + "(produto_id, produto_nome, tipo, quantidade, quantidade_resultante, "
+                + " cliente_id, cliente_nome) "
+                + "VALUES (?, 'Produto', 'SAIDA', 1, 0, ?, 'Maria Flores')", produtoId, clienteId);
     }
 
     // ---- CA-1: lista paginada, ordem nome ASC + filtro ILIKE + paginacao invalida 400 ---------
@@ -125,48 +138,45 @@ class ClienteApiTest {
                 .andExpect(jsonPath("$.error.details[0].field").value("pagina"));
     }
 
-    // ---- CA-3: cada item da lista traz produtoIds=null (nunca materializa o vinculo) ----------
+    // ---- CA-3: cada item da lista NAO materializa o vinculo (produtoIds ausente) --------------
 
     @Test
-    void listar_itemDaLista_temProdutoIdsNull() throws Exception {
-        Long clienteId = inserirCliente("Maria Flores", "(11) 90000-0001", "maria@exemplo.com.br");
-        Long produtoId = inserirProduto("Rosa");
-        jdbc.update("INSERT INTO cliente_produto (cliente_id, produto_id) VALUES (?, ?)",
-                clienteId, produtoId);
+    void listar_itemDaLista_naoMaterializaVinculo() throws Exception {
+        inserirCliente("Maria Flores", "(11) 90000-0001", "maria@exemplo.com.br");
 
         mockMvc.perform(get("/api/v1/clientes")
                         .header(HttpHeaders.AUTHORIZATION, userBearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElementos").value(1))
-                // vinculo existe no banco, mas a LISTA nao o materializa (CA-3/AD-SQ-38/44).
+                // a LISTA nunca materializa o vinculo (CA-3/AD-SQ-38).
                 .andExpect(jsonPath("$.data.conteudo[0].produtoIds").doesNotExist());
     }
 
-    // ---- CA-2: detalhe com produtoIds + inexistente 404 ---------------------------------------
+    // ---- CA-2/R-CA-7: detalhe com produtoIds DERIVADO das SAIDAS + inexistente 404 ------------
 
     @Test
-    void detalhar_existente_devolve200ComProdutoIds() throws Exception {
+    void detalhar_existente_devolve200ComProdutoIdsDerivados() throws Exception {
         Long clienteId = inserirCliente("Maria Flores", "(11) 90000-0001", "maria@exemplo.com.br");
         Long produtoA = inserirProduto("Rosa");
         Long produtoB = inserirProduto("Tulipa");
-        jdbc.update("INSERT INTO cliente_produto (cliente_id, produto_id) VALUES (?, ?)",
-                clienteId, produtoB);
-        jdbc.update("INSERT INTO cliente_produto (cliente_id, produto_id) VALUES (?, ?)",
-                clienteId, produtoA);
+        // duas SAIDAS (uma repetida para provar o DISTINCT) → produtoIds = [A, B] ordenados.
+        inserirSaida(clienteId, produtoB);
+        inserirSaida(clienteId, produtoA);
+        inserirSaida(clienteId, produtoA);
 
         mockMvc.perform(get("/api/v1/clientes/" + clienteId)
                         .header(HttpHeaders.AUTHORIZATION, userBearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(clienteId))
                 .andExpect(jsonPath("$.data.nome").value("Maria Flores"))
-                .andExpect(jsonPath("$.data.email").value("maria@exemplo.com.br"))
-                // ORDER BY produto_id → menor id primeiro (independe da ordem de insercao).
+                // derivado do ledger (SAIDAS), dedup + ORDER BY produto_id (R-CA-7).
+                .andExpect(jsonPath("$.data.produtoIds.length()").value(2))
                 .andExpect(jsonPath("$.data.produtoIds[0]").value(produtoA))
                 .andExpect(jsonPath("$.data.produtoIds[1]").value(produtoB));
     }
 
     @Test
-    void detalhar_semVinculos_devolveProdutoIdsVazio() throws Exception {
+    void detalhar_semMovimentacao_devolveProdutoIdsVazio() throws Exception {
         Long clienteId = inserirCliente("Maria Flores", null, null);
 
         mockMvc.perform(get("/api/v1/clientes/" + clienteId)

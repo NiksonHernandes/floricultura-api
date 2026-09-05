@@ -25,9 +25,12 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * Integracao da LEITURA de fornecedores do M5 (T-M5-3, CA-1/CA-2/CA-3 — SPEC-M5 §3.4), espelho de
  * {@code ClienteApiTest}, contra um PostgreSQL de DESCARTE (Testcontainers postgres:16), com
  * {@code FornecedorController}/{@code FornecedorService} e filtro JWT reais. Prova a lista paginada
- * ordenada {@code nome ASC} + filtro {@code ILIKE} + paginacao invalida (400), o detalhe com
- * {@code produtoIds} + 404, e o invariante de que a lista <b>nao</b> materializa o vinculo
- * ({@code produtoIds=null} nos itens). Dados ficticios (LGPD): "Flora Atacado" / {@code @exemplo.com.br}.
+ * ordenada {@code nome ASC} + filtro {@code ILIKE} + paginacao invalida (400), o detalhe (200/404) e o
+ * invariante de que a lista <b>nao</b> materializa o vinculo ({@code produtoIds} ausente nos itens). Dados
+ * ficticios (LGPD): "Flora Atacado" / {@code @exemplo.com.br}.
+ *
+ * <p><b>Revisao 2026-09-04 (AD-SQ-65/R-CA-7):</b> o vinculo fornecedor↔produto e derivado da movimentacao
+ * — o {@code produtoIds} do detalhe vem das ENTRADAS deste fornecedor (V10); a LISTA nunca o materializa.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -60,8 +63,11 @@ class FornecedorApiTest {
 
     @BeforeEach
     void seed() {
-        jdbc.update("DELETE FROM fornecedor_produto");
+        // TRUNCATE do ledger ANTES de apagar fornecedor/produto (senao o cascade SET NULL vira UPDATE
+        // barrado pela trigger de imutabilidade). Vazio = DELETE seguro.
+        jdbc.update("TRUNCATE TABLE movimentacao_estoque");
         jdbc.update("DELETE FROM fornecedor");
+        jdbc.update("DELETE FROM produto");
         jdbc.update("DELETE FROM usuario");
         Long userId = inserirUsuario("user-fornecedor@floricultura.local", "USER");
         userBearer = "Bearer " + jwtService.gerarToken(userId);
@@ -85,6 +91,14 @@ class FornecedorApiTest {
         return jdbc.queryForObject(
                 "INSERT INTO produto (nome, unidade_medida) VALUES (?, 'un') RETURNING id",
                 Long.class, nome);
+    }
+
+    /** Insere uma ENTRADA no ledger vinculando produto↔fornecedor (fonte do produtoIds derivado). */
+    private void inserirEntrada(Long fornecedorId, Long produtoId) {
+        jdbc.update("INSERT INTO movimentacao_estoque "
+                + "(produto_id, produto_nome, tipo, quantidade, quantidade_resultante, "
+                + " fornecedor_id, fornecedor_nome) "
+                + "VALUES (?, 'Produto', 'ENTRADA', 1, 1, ?, 'Flora Atacado')", produtoId, fornecedorId);
     }
 
     // ---- CA-1: lista paginada, ordem nome ASC + filtro ILIKE + paginacao invalida 400 ---------
@@ -122,50 +136,46 @@ class FornecedorApiTest {
                 .andExpect(jsonPath("$.error.details[0].field").value("pagina"));
     }
 
-    // ---- CA-3: cada item da lista traz produtoIds=null (nunca materializa o vinculo) ----------
+    // ---- CA-3: cada item da lista NAO materializa o vinculo (produtoIds ausente) --------------
 
     @Test
-    void listar_itemDaLista_temProdutoIdsNull() throws Exception {
-        Long fornecedorId = inserirFornecedor(
-                "Flora Atacado", "(11) 90000-0001", "flora@exemplo.com.br");
-        Long produtoId = inserirProduto("Rosa");
-        jdbc.update("INSERT INTO fornecedor_produto (fornecedor_id, produto_id) VALUES (?, ?)",
-                fornecedorId, produtoId);
+    void listar_itemDaLista_naoMaterializaVinculo() throws Exception {
+        inserirFornecedor("Flora Atacado", "(11) 90000-0001", "flora@exemplo.com.br");
 
         mockMvc.perform(get("/api/v1/fornecedores")
                         .header(HttpHeaders.AUTHORIZATION, userBearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElementos").value(1))
-                // vinculo existe no banco, mas a LISTA nao o materializa (CA-3/AD-SQ-38/44).
+                // a LISTA nunca materializa o vinculo (CA-3/AD-SQ-38).
                 .andExpect(jsonPath("$.data.conteudo[0].produtoIds").doesNotExist());
     }
 
-    // ---- CA-2: detalhe com produtoIds + inexistente 404 ---------------------------------------
+    // ---- CA-2/R-CA-7: detalhe com produtoIds DERIVADO das ENTRADAS + inexistente 404 ---------
 
     @Test
-    void detalhar_existente_devolve200ComProdutoIds() throws Exception {
+    void detalhar_existente_devolve200ComProdutoIdsDerivados() throws Exception {
         Long fornecedorId = inserirFornecedor(
                 "Flora Atacado", "(11) 90000-0001", "flora@exemplo.com.br");
         Long produtoA = inserirProduto("Rosa");
         Long produtoB = inserirProduto("Tulipa");
-        jdbc.update("INSERT INTO fornecedor_produto (fornecedor_id, produto_id) VALUES (?, ?)",
-                fornecedorId, produtoB);
-        jdbc.update("INSERT INTO fornecedor_produto (fornecedor_id, produto_id) VALUES (?, ?)",
-                fornecedorId, produtoA);
+        // duas ENTRADAS (uma repetida para provar o DISTINCT) → produtoIds = [A, B] ordenados.
+        inserirEntrada(fornecedorId, produtoB);
+        inserirEntrada(fornecedorId, produtoA);
+        inserirEntrada(fornecedorId, produtoA);
 
         mockMvc.perform(get("/api/v1/fornecedores/" + fornecedorId)
                         .header(HttpHeaders.AUTHORIZATION, userBearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(fornecedorId))
                 .andExpect(jsonPath("$.data.nome").value("Flora Atacado"))
-                .andExpect(jsonPath("$.data.email").value("flora@exemplo.com.br"))
-                // ORDER BY produto_id → menor id primeiro (independe da ordem de insercao).
+                // derivado do ledger (ENTRADAS), dedup + ORDER BY produto_id (R-CA-7).
+                .andExpect(jsonPath("$.data.produtoIds.length()").value(2))
                 .andExpect(jsonPath("$.data.produtoIds[0]").value(produtoA))
                 .andExpect(jsonPath("$.data.produtoIds[1]").value(produtoB));
     }
 
     @Test
-    void detalhar_semVinculos_devolveProdutoIdsVazio() throws Exception {
+    void detalhar_semMovimentacao_devolveProdutoIdsVazio() throws Exception {
         Long fornecedorId = inserirFornecedor("Flora Atacado", null, null);
 
         mockMvc.perform(get("/api/v1/fornecedores/" + fornecedorId)
