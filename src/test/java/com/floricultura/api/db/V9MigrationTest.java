@@ -1,7 +1,6 @@
 package com.floricultura.api.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 
 import java.util.List;
 import java.util.Map;
@@ -16,17 +15,18 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * Integracao da migracao V9 (T-M5-1, CA-9 — camada de schema) contra um PostgreSQL de DESCARTE
- * (Testcontainers postgres:16). Sobe o contexto real (datasource/JPA/Flyway ativos com {@code
- * ddl-auto=validate}): o Flyway aplica V1..V9 na subida e as asercoes validam via JDBC (dispensa
- * {@code psql}).
+ * Integracao da migracao V9 (CA-9 — camada de schema) contra um PostgreSQL de DESCARTE (Testcontainers
+ * postgres:16). Sobe o contexto real (datasource/JPA/Flyway ativos com {@code ddl-auto=validate}): o
+ * Flyway aplica V1..V9 na subida e as asercoes validam via JDBC (dispensa {@code psql}).
  *
- * <p>Cobre a evolucao dos stubs `cliente`/`fornecedor` do M0 (AD-SQ-58) sob minimizacao LGPD: DROP
- * de {@code tipo_pessoa}/{@code documento}/{@code endereco}, {@code telefone -> VARCHAR(40)}, nova
- * coluna {@code observacoes VARCHAR(500)}, indices {@code ix_cliente_nome}/{@code ix_fornecedor_nome},
- * e as duas juncoes N:N {@code cliente_produto}/{@code fornecedor_produto} (AD-SQ-44) com PK composta
- * + FKs {@code ON DELETE CASCADE} nos dois lados. O boot com {@code validate} verde comprova que o
- * schema V9 nao quebra as entidades ja mapeadas (M0..M4).
+ * <p>Cobre a evolucao dos stubs `cliente`/`fornecedor` do M0 (AD-SQ-58) sob minimizacao LGPD: DROP de
+ * {@code tipo_pessoa}/{@code documento}/{@code endereco}, {@code telefone -> VARCHAR(40)}, nova coluna
+ * {@code observacoes VARCHAR(500)} e indices {@code ix_cliente_nome}/{@code ix_fornecedor_nome}.
+ *
+ * <p><b>Revisao 2026-09-04 (AD-SQ-65 / R-CA-9):</b> a V9 foi editada in-place e <b>nao</b> cria mais as
+ * juncoes N:N {@code cliente_produto}/{@code fornecedor_produto} — o vinculo passou a ser derivado da
+ * movimentacao. Este teste passa a provar a <b>ausencia</b> dessas tabelas. O boot com {@code validate}
+ * verde comprova que o schema V9 nao quebra as entidades ja mapeadas (M0..M4 + M5).
  */
 @SpringBootTest
 @Testcontainers
@@ -53,17 +53,6 @@ class V9MigrationTest {
                         + "FROM information_schema.columns "
                         + "WHERE table_name = ? AND column_name = ?", tabela, nome)
                 .stream().findFirst().orElse(null);
-    }
-
-    private Long inserirProduto(String nome) {
-        return jdbc.queryForObject(
-                "INSERT INTO produto (nome, unidade_medida) VALUES (?, 'un') RETURNING id",
-                Long.class, nome);
-    }
-
-    private Long inserirCadastro(String tabela, String nome) {
-        return jdbc.queryForObject(
-                "INSERT INTO " + tabela + " (nome) VALUES (?) RETURNING id", Long.class, nome);
     }
 
     // ----- CA-9: V9 aplicada + boot validate verde -----
@@ -123,76 +112,14 @@ class V9MigrationTest {
         assertThat(ixFornecedor).contains("ix_fornecedor_nome");
     }
 
-    // ----- CA-9: junções N:N com PK composta, FKs e indices -----
+    // ----- R-CA-9: vinculo virou derivado — as juncoes N:N NAO existem mais -----
 
-    /** cliente_produto e fornecedor_produto existem com PK composta, FKs e indice por produto. */
+    /** A V9 editada in-place (AD-SQ-65) nao cria mais cliente_produto/fornecedor_produto. */
     @Test
-    void tabelasDeJuncaoExistemComPkFksEIndice() {
+    void juncoesNaoExistemMais() {
         List<String> tabelas = jdbc.queryForList(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
                 String.class);
-        assertThat(tabelas).contains("cliente_produto", "fornecedor_produto");
-
-        List<String> cpConstraints = jdbc.queryForList(
-                "SELECT conname FROM pg_constraint WHERE conrelid = 'cliente_produto'::regclass",
-                String.class);
-        assertThat(cpConstraints).contains("pk_cliente_produto", "fk_cp_cliente", "fk_cp_produto");
-
-        List<String> fpConstraints = jdbc.queryForList(
-                "SELECT conname FROM pg_constraint WHERE conrelid = 'fornecedor_produto'::regclass",
-                String.class);
-        assertThat(fpConstraints).contains(
-                "pk_fornecedor_produto", "fk_fp_fornecedor", "fk_fp_produto");
-
-        assertThat(jdbc.queryForList(
-                "SELECT indexname FROM pg_indexes WHERE tablename = 'cliente_produto'", String.class))
-                .contains("ix_cp_produto");
-        assertThat(jdbc.queryForList(
-                "SELECT indexname FROM pg_indexes WHERE tablename = 'fornecedor_produto'", String.class))
-                .contains("ix_fp_produto");
-    }
-
-    /** Hard delete do CADASTRO (FC-08) remove os vinculos por cascade e preserva o produto. */
-    @Test
-    void hardDeleteDoCadastroRemoveVinculoEPreservaProduto() {
-        for (String cadastro : List.of("cliente", "fornecedor")) {
-            String juncao = cadastro + "_produto";
-            Long cadastroId = inserirCadastro(cadastro, "Maria Flores");
-            Long produtoId = inserirProduto("Rosa " + cadastro);
-            jdbc.update("INSERT INTO " + juncao + " (" + cadastro + "_id, produto_id) VALUES (?, ?)",
-                    cadastroId, produtoId);
-
-            jdbc.update("DELETE FROM " + cadastro + " WHERE id = ?", cadastroId);
-
-            Integer links = jdbc.queryForObject(
-                    "SELECT count(*) FROM " + juncao + " WHERE produto_id = ?", Integer.class, produtoId);
-            assertThat(links).as(juncao + " apos delete do " + cadastro).isZero();
-            Integer produtos = jdbc.queryForObject(
-                    "SELECT count(*) FROM produto WHERE id = ?", Integer.class, produtoId);
-            assertThat(produtos).as("produto preservado apos delete do " + cadastro).isEqualTo(1);
-        }
-    }
-
-    /** Hard delete do PRODUTO remove os vinculos por cascade e preserva o cadastro. */
-    @Test
-    void hardDeleteDoProdutoRemoveVinculoEPreservaCadastro() {
-        for (String cadastro : List.of("cliente", "fornecedor")) {
-            String juncao = cadastro + "_produto";
-            Long cadastroId = inserirCadastro(cadastro, "Contato Fornecimento");
-            Long produtoId = inserirProduto("Lirio " + cadastro);
-            jdbc.update("INSERT INTO " + juncao + " (" + cadastro + "_id, produto_id) VALUES (?, ?)",
-                    cadastroId, produtoId);
-
-            assertThatCode(() -> jdbc.update("DELETE FROM produto WHERE id = ?", produtoId))
-                    .doesNotThrowAnyException();
-
-            Integer links = jdbc.queryForObject(
-                    "SELECT count(*) FROM " + juncao + " WHERE " + cadastro + "_id = ?",
-                    Integer.class, cadastroId);
-            assertThat(links).as(juncao + " apos delete do produto").isZero();
-            Integer cadastros = jdbc.queryForObject(
-                    "SELECT count(*) FROM " + cadastro + " WHERE id = ?", Integer.class, cadastroId);
-            assertThat(cadastros).as(cadastro + " preservado apos delete do produto").isEqualTo(1);
-        }
+        assertThat(tabelas).doesNotContain("cliente_produto", "fornecedor_produto");
     }
 }

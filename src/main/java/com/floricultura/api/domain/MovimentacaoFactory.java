@@ -37,6 +37,10 @@ public final class MovimentacaoFactory {
      * @param motivo               motivo livre (pode ser {@code null})
      * @param usuarioId            id do autor (do principal autenticado)
      * @param usuarioNome          snapshot do nome do autor (V7/AD-SQ-45; pode ser {@code null})
+     * @param fornecedorId         id do fornecedor da contraparte (V10/AD-SQ-64; so ENTRADA; {@code null} se ausente)
+     * @param fornecedorNome       snapshot do nome do fornecedor (resolvido pelo servico; {@code null} se ausente)
+     * @param clienteId            id do cliente da contraparte (V10/AD-SQ-64; so SAIDA; {@code null} se ausente)
+     * @param clienteNome          snapshot do nome do cliente (resolvido pelo servico; {@code null} se ausente)
      * @return entidade transiente pronta para persistir
      */
     public static MovimentacaoEstoque nova(
@@ -47,7 +51,11 @@ public final class MovimentacaoFactory {
             BigDecimal quantidadeResultante,
             String motivo,
             Long usuarioId,
-            String usuarioNome) {
+            String usuarioNome,
+            Long fornecedorId,
+            String fornecedorNome,
+            Long clienteId,
+            String clienteNome) {
         MovimentacaoEstoque mov = new MovimentacaoEstoque();
         mov.setProdutoId(produtoId);
         mov.setProdutoNome(produtoNome);
@@ -57,6 +65,10 @@ public final class MovimentacaoFactory {
         mov.setMotivo(motivo);
         mov.setUsuarioId(usuarioId);
         mov.setUsuarioNome(usuarioNome);
+        mov.setFornecedorId(fornecedorId);
+        mov.setFornecedorNome(fornecedorNome);
+        mov.setClienteId(clienteId);
+        mov.setClienteNome(clienteNome);
         return mov;
     }
 }

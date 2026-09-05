@@ -7,8 +7,8 @@ package com.floricultura.api.domain;
  * {@code EventoFactory}/{@code ProdutoFactory}).
  *
  * <p>{@code criado_em}/{@code atualizado_em} <b>nao</b> sao setados aqui: vem do {@code DEFAULT now()}
- * do banco (colunas {@code insertable=false}). Os vinculos N:N {@code produtoIds} sao aplicados por
- * query nativa dedicada no {@code ClienteProdutoVinculoService} (T-M5-4), nao pela fabrica.
+ * do banco (colunas {@code insertable=false}). O vinculo cliente↔produto e derivado da movimentacao
+ * (AD-SQ-65), nao escrito pelo cadastro.
  */
 public final class ClienteFactory {
 

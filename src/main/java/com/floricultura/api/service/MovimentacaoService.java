@@ -3,6 +3,8 @@ package com.floricultura.api.service;
 import com.floricultura.api.domain.MovimentacaoEstoque;
 import com.floricultura.api.domain.MovimentacaoFactory;
 import com.floricultura.api.domain.Produto;
+import com.floricultura.api.repository.ClienteRepository;
+import com.floricultura.api.repository.FornecedorRepository;
 import com.floricultura.api.repository.MovimentacaoRepository;
 import com.floricultura.api.repository.ProdutoRepository;
 import com.floricultura.api.web.dto.MovimentacaoRequest;
@@ -50,12 +52,18 @@ public class MovimentacaoService {
 
     private final ProdutoRepository produtoRepository;
     private final MovimentacaoRepository movimentacaoRepository;
+    private final FornecedorRepository fornecedorRepository;
+    private final ClienteRepository clienteRepository;
 
     public MovimentacaoService(
             @Lazy ProdutoRepository produtoRepository,
-            @Lazy MovimentacaoRepository movimentacaoRepository) {
+            @Lazy MovimentacaoRepository movimentacaoRepository,
+            @Lazy FornecedorRepository fornecedorRepository,
+            @Lazy ClienteRepository clienteRepository) {
         this.produtoRepository = produtoRepository;
         this.movimentacaoRepository = movimentacaoRepository;
+        this.fornecedorRepository = fornecedorRepository;
+        this.clienteRepository = clienteRepository;
     }
 
     /**
@@ -85,6 +93,10 @@ public class MovimentacaoService {
     @Transactional
     public MovimentacaoResponse movimentar(
             Long produtoId, MovimentacaoRequest req, Long usuarioId, String usuarioNome) {
+        // Contraparte (V10/AD-SQ-64, R-CA-3/4/5): valida tipo×contraparte + existencia e resolve os
+        // snapshots de nome ANTES de qualquer escrita — 400 com field, nada persiste.
+        Contraparte contraparte = resolverContraparte(req);
+
         Produto produto = produtoRepository.findByIdForUpdate(produtoId)
                 .orElseThrow(ProdutoNaoEncontradoException::new);
 
@@ -105,7 +117,11 @@ public class MovimentacaoService {
                 resultante,
                 req.motivo(),
                 usuarioId,
-                usuarioNome);
+                usuarioNome,
+                contraparte.fornecedorId(),
+                contraparte.fornecedorNome(),
+                contraparte.clienteId(),
+                contraparte.clienteNome());
         mov = movimentacaoRepository.saveAndFlush(mov);
 
         // criado_em vem do DEFAULT now() do banco (coluna insertable=false) — projecao escalar le o
@@ -175,5 +191,72 @@ public class MovimentacaoService {
         String filtro = (q == null || q.isBlank()) ? null : q.trim();
         Page<MovimentacaoEstoque> page = movimentacaoRepository.buscarGlobal(filtro, pageable);
         return PaginaResponse.de(page, MovimentacaoResponse::de);
+    }
+
+    /**
+     * Valida a contraparte por tipo (§R3.3/R-CA-3/4/5) e resolve o <b>snapshot do nome</b> do cadastro no
+     * momento (padrao {@code usuario_nome}/AD-SQ-45 — nunca do payload). Roda <b>antes</b> de qualquer
+     * escrita; qualquer violacao lanca {@link ContraparteInvalidaException} (400 com {@code field}),
+     * entao nada persiste. Regras:
+     * <ul>
+     *   <li><b>ENTRADA:</b> {@code clienteId} deve ser {@code null}; {@code fornecedorId} opcional — se
+     *       presente, precisa existir (senao 400 {@code field=fornecedorId}).</li>
+     *   <li><b>SAIDA:</b> {@code fornecedorId} deve ser {@code null}; {@code clienteId} opcional — se
+     *       presente, precisa existir (senao 400 {@code field=clienteId}).</li>
+     *   <li><b>AJUSTE:</b> ambos {@code null}.</li>
+     * </ul>
+     */
+    private Contraparte resolverContraparte(MovimentacaoRequest req) {
+        Long fornecedorId = req.fornecedorId();
+        Long clienteId = req.clienteId();
+        switch (req.tipo()) {
+            case ENTRADA:
+                if (clienteId != null) {
+                    throw new ContraparteInvalidaException(
+                            "clienteId", "clienteId so e permitido em movimentacao de SAIDA.");
+                }
+                if (fornecedorId == null) {
+                    return Contraparte.vazia();
+                }
+                String fornecedorNome = fornecedorRepository.findNomeById(fornecedorId);
+                if (fornecedorNome == null) {
+                    throw new ContraparteInvalidaException(
+                            "fornecedorId", "Fornecedor inexistente.");
+                }
+                return new Contraparte(fornecedorId, fornecedorNome, null, null);
+            case SAIDA:
+                if (fornecedorId != null) {
+                    throw new ContraparteInvalidaException(
+                            "fornecedorId", "fornecedorId so e permitido em movimentacao de ENTRADA.");
+                }
+                if (clienteId == null) {
+                    return Contraparte.vazia();
+                }
+                String clienteNome = clienteRepository.findNomeById(clienteId);
+                if (clienteNome == null) {
+                    throw new ContraparteInvalidaException("clienteId", "Cliente inexistente.");
+                }
+                return new Contraparte(null, null, clienteId, clienteNome);
+            case AJUSTE:
+            default:
+                if (fornecedorId != null) {
+                    throw new ContraparteInvalidaException(
+                            "fornecedorId", "AJUSTE nao aceita contraparte.");
+                }
+                if (clienteId != null) {
+                    throw new ContraparteInvalidaException(
+                            "clienteId", "AJUSTE nao aceita contraparte.");
+                }
+                return Contraparte.vazia();
+        }
+    }
+
+    /** Contraparte resolvida (id + snapshot do nome) pronta para gravar no ledger — nunca do payload. */
+    private record Contraparte(
+            Long fornecedorId, String fornecedorNome, Long clienteId, String clienteNome) {
+
+        static Contraparte vazia() {
+            return new Contraparte(null, null, null, null);
+        }
     }
 }

@@ -118,4 +118,28 @@ public interface ProdutoRepository extends JpaRepository<Produto, Long> {
     @Query(value = "INSERT INTO evento_produto (produto_id, evento_id) VALUES (:produtoId, :eventoId) "
             + "ON CONFLICT DO NOTHING", nativeQuery = true)
     void inserirVinculo(@Param("produtoId") Long produtoId, @Param("eventoId") Long eventoId);
+
+    // ----- Relacionamentos derivados do produto (M5-revisao/AD-SQ-66, §R3.5): leitura read-only por
+    // ----- NOME, colunas enumeradas (sem bytea/AD-SQ-38), JOIN na tabela VIVA (nome atual; cadastro
+    // ----- hard-deletado sai por id nulo no ledger -> INNER JOIN nao casa -> id sempre nao-nulo). -----
+
+    /** Eventos vinculados ao produto (via evento_produto/AD-SQ-44), ordenados por nome. */
+    @Query(value = "SELECT e.id AS id, e.nome AS nome FROM evento_produto ep "
+            + "JOIN evento e ON e.id = ep.evento_id WHERE ep.produto_id = :id ORDER BY e.nome",
+            nativeQuery = true)
+    List<ReferenciaSimplesProjection> findEventosRelacionados(@Param("id") Long id);
+
+    /** Fornecedores das ENTRADAS deste produto (DISTINCT), ordenados por nome. */
+    @Query(value = "SELECT DISTINCT f.id AS id, f.nome AS nome FROM movimentacao_estoque m "
+            + "JOIN fornecedor f ON f.id = m.fornecedor_id "
+            + "WHERE m.produto_id = :id AND m.tipo = 'ENTRADA' ORDER BY f.nome",
+            nativeQuery = true)
+    List<ReferenciaSimplesProjection> findFornecedoresRelacionados(@Param("id") Long id);
+
+    /** Clientes das SAIDAS deste produto (DISTINCT), ordenados por nome. */
+    @Query(value = "SELECT DISTINCT c.id AS id, c.nome AS nome FROM movimentacao_estoque m "
+            + "JOIN cliente c ON c.id = m.cliente_id "
+            + "WHERE m.produto_id = :id AND m.tipo = 'SAIDA' ORDER BY c.nome",
+            nativeQuery = true)
+    List<ReferenciaSimplesProjection> findClientesRelacionados(@Param("id") Long id);
 }

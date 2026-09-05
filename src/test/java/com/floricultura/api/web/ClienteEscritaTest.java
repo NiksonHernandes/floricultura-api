@@ -30,9 +30,12 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * DESCARTE (Testcontainers postgres:16), com {@code ClienteController}/{@code ClienteService}, {@code
  * SecurityConfig} endurecido (matchers §3.4) e filtro JWT reais. Prova o RBAC por metodo (POST/PUT/DELETE
  * = ADMIN; USER → 403; sem token → 401), a validacao Bean Validation ({@code nome} vazio / {@code email}
- * malformado → 400 com {@code details}), o PUT (200/404) e o hard delete com cascade (contagem na juncao +
- * produtos intactos). O replace-set/{@code produtoIds} tem suite propria ({@code ClienteVinculoTest}).
- * Dados ficticios (LGPD): "Maria Flores" / {@code @exemplo.com.br}.
+ * malformado → 400 com {@code details}), o PUT (200/404) e o hard delete (204; produtos intactos). Dados
+ * ficticios (LGPD): "Maria Flores" / {@code @exemplo.com.br}.
+ *
+ * <p><b>Revisao 2026-09-04 (AD-SQ-65):</b> o vinculo cliente↔produto virou derivado da movimentacao —
+ * nao ha mais {@code produtoIds} de escrita, replace-set nem juncao {@code cliente_produto} (a suite
+ * {@code ClienteVinculoTest} foi removida).
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -66,7 +69,6 @@ class ClienteEscritaTest {
 
     @BeforeEach
     void seed() {
-        jdbc.update("DELETE FROM cliente_produto");
         jdbc.update("DELETE FROM cliente");
         jdbc.update("DELETE FROM usuario");
         Long adminId = inserirUsuario("admin-clienteescrita@floricultura.local", "ADMIN");
@@ -97,7 +99,7 @@ class ClienteEscritaTest {
     // ---- CA-4: criar (ADMIN) 201; validacoes 400; USER 403; sem token 401 ---------------------
 
     @Test
-    void criar_comAdmin_devolve201ComProdutoIdsVazio() throws Exception {
+    void criar_comAdmin_devolve201() throws Exception {
         String body = """
                 {"nome":"Maria Flores","telefone":"(11) 90000-0000",
                  "email":"maria@exemplo.com.br","observacoes":"Prefere arranjos de outono."}""";
@@ -110,9 +112,6 @@ class ClienteEscritaTest {
                 .andExpect(jsonPath("$.data.id").isNumber())
                 .andExpect(jsonPath("$.data.nome").value("Maria Flores"))
                 .andExpect(jsonPath("$.data.email").value("maria@exemplo.com.br"))
-                // produtoIds ausente no payload → detalhe traz [] (§4.5/CA-4).
-                .andExpect(jsonPath("$.data.produtoIds").isArray())
-                .andExpect(jsonPath("$.data.produtoIds.length()").value(0))
                 .andExpect(jsonPath("$.data.criadoEm").isNotEmpty());
     }
 
@@ -178,8 +177,7 @@ class ClienteEscritaTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.nome").value("Maria Flores"))
                 .andExpect(jsonPath("$.data.email").value("maria.nova@exemplo.com.br"))
-                .andExpect(jsonPath("$.data.telefone").value("(11) 91111-1111"))
-                .andExpect(jsonPath("$.data.produtoIds").isArray());
+                .andExpect(jsonPath("$.data.telefone").value("(11) 91111-1111"));
     }
 
     @Test
@@ -207,14 +205,12 @@ class ClienteEscritaTest {
                 .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 
-    // ---- CA-6: hard delete (ADMIN) 204 + cascade / inexistente 404 / USER 403 -----------------
+    // ---- CA-6: hard delete (ADMIN) 204 / inexistente 404 / USER 403 ---------------------------
 
     @Test
-    void excluir_comAdmin_devolve204ERemoveVinculosPreservandoProduto() throws Exception {
+    void excluir_comAdmin_devolve204PreservandoProduto() throws Exception {
         Long clienteId = inserirCliente("Maria Flores");
         Long produtoId = inserirProduto("Rosa");
-        jdbc.update("INSERT INTO cliente_produto (cliente_id, produto_id) VALUES (?, ?)",
-                clienteId, produtoId);
 
         mockMvc.perform(delete("/api/v1/clientes/" + clienteId)
                         .header(HttpHeaders.AUTHORIZATION, adminBearer))
@@ -222,13 +218,10 @@ class ClienteEscritaTest {
 
         Integer clientes = jdbc.queryForObject(
                 "SELECT count(*) FROM cliente WHERE id = ?", Integer.class, clienteId);
-        Integer vinculos = jdbc.queryForObject(
-                "SELECT count(*) FROM cliente_produto WHERE cliente_id = ?", Integer.class, clienteId);
         Integer produtos = jdbc.queryForObject(
                 "SELECT count(*) FROM produto WHERE id = ?", Integer.class, produtoId);
-        assertEquals(0, clientes);
-        assertEquals(0, vinculos); // cascade limpou a juncao (CA-6)
-        assertEquals(1, produtos); // produto preservado (CA-6)
+        assertEquals(0, clientes); // cadastro removido (hard delete FC-08)
+        assertEquals(1, produtos); // produto (dado independente) preservado (CA-6)
     }
 
     @Test
