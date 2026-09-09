@@ -96,6 +96,29 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- M5.2/T-M5.2-3 (SPEC-M5.2 §3.5): pipeline de imagem (3 variantes, resize -> encode WebP q80
+		     com fallback JPEG). NAO sao BOM-managed => versoes PINADAS (mesmo padrao do springdoc).
+		     - thumbnailator: encode JPEG q80 puro-Java (fallback SEMPRE disponivel; flatten RGB sem pink-tint).
+		     - imageio-webp (TwelveMonkeys): READER WebP puro-Java p/ ImageIO — DECODA uploads .webp (o
+		       ImageIO base nao le WebP). Separado do writer nativo: decode de .webp funciona mesmo sem o nativo.
+		     - webp-imageio (usefulness): WRITER WebP via ImageIO SPI (encode image/webp q80). Nativo empacotado;
+		       se nao carregar no host, o pipeline cai no fallback JPEG (detectado em runtime — §3.5). -->
+		<dependency>
+			<groupId>net.coobird</groupId>
+			<artifactId>thumbnailator</artifactId>
+			<version>0.4.20</version>
+		</dependency>
+		<dependency>
+			<groupId>com.twelvemonkeys.imageio</groupId>
+			<artifactId>imageio-webp</artifactId>
+			<version>3.12.0</version>
+		</dependency>
+		<dependency>
+			<groupId>com.github.usefulness</groupId>
+			<artifactId>webp-imageio</artifactId>
+			<version>0.9.0</version>
+		</dependency>
+
 		<!-- Testes (JUnit 5 + Spring Boot Test). -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

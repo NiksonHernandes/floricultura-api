@@ -40,8 +40,10 @@ spring:
       add-mappings: false
   servlet:
     # M3 — upload de imagem (SPEC-M3 §3.3/§12): o teto do container fica ACIMA do limite de negocio
-    # (app.upload.imagem.max-bytes = 5 MB) para o validador de servico dar o 400 amigavel antes; se
-    # ainda assim estourar, MaxUploadSizeExceededException e traduzida no envelope (400) — T-M3-3.
+    # (app.upload.imagem.max-bytes = 2 MB no M5.2) para o validador de servico dar o 400 amigavel antes;
+    # se ainda assim estourar, MaxUploadSizeExceededException e traduzida no envelope (400) — T-M3-3.
+    # M5.2/§3.7: NAO reduzir o teto do container p/ 2 MB — ele fica acima (6 MB) para o 400 amigavel
+    # do servico disparar antes do parse (senao vira MaxUploadSizeExceededException cru na faixa 2-6 MB).
     multipart:
       max-file-size: 6MB
       max-request-size: 6MB
@@ -57,11 +59,16 @@ app:
   jwt:
     secret: ${APP_JWT_SECRET}
     ttl-seconds: ${APP_JWT_TTL:3600}
-  # M3 — limite de negocio do upload de imagem (SPEC-M3 §3.3/AD-SQ-38): default 5 MB (5242880 bytes),
-  # ajustavel por env APP_UPLOAD_IMAGEM_MAX_BYTES. Consumido pela validacao de servico em T-M3-3.
+  # M3/M5.2 — limite de negocio do upload de imagem (SPEC-M5.2 §3.7/AD-SQ-38): teto de ENTRADA reduzido
+  # p/ 2 MB (2097152 bytes), ajustavel por env APP_UPLOAD_IMAGEM_MAX_BYTES. Validacao de tipo + magic
+  # bytes inalterada; consumido pela validacao de servico (T-M3-3/T-M5.2-5).
   upload:
     imagem:
-      max-bytes: ${APP_UPLOAD_IMAGEM_MAX_BYTES:5242880}
+      max-bytes: ${APP_UPLOAD_IMAGEM_MAX_BYTES:2097152}
+      # M5.2/§3.5: interruptor do encoder WebP. Efetivo = webp-habilitado (config) && webpDisponivel
+      # (deteccao runtime do writer nativo). default true = WebP quando o nativo carrega, fallback JPEG q80
+      # automatico quando nao. O dono pode setar false no host p/ forcar JPEG SEM redeploy.
+      webp-habilitado: ${APP_UPLOAD_IMAGEM_WEBP_HABILITADO:true}
 
 # Actuator: expor apenas health e info (SPEC-M0 §3.3).
 management:

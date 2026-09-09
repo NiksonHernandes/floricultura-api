@@ -50,6 +50,17 @@ public interface ProdutoRepository extends JpaRepository<Produto, Long> {
     Optional<ProdutoImagemProjection> findImagemById(@Param("id") Long id);
 
     /**
+     * Leitura <b>leve</b> (SEM bytea) do original: content-type + {@code atualizado_em} em epoch-millis,
+     * para o {@code GET .../imagem} do M5.2 decidir 404 e calcular o {@code ETag} <b>sem materializar o
+     * binario</b> (SPEC-M5.2 §3.6, T-M5.2-4). Vazio → produto inexistente; {@code imagemContentType}
+     * nulo → produto sem imagem. Aliases camelCase casam {@link ProdutoImagemMetaProjection}.
+     */
+    @Query(value = "SELECT imagem_content_type AS imagemContentType, "
+            + "CAST(EXTRACT(EPOCH FROM atualizado_em) * 1000 AS BIGINT) AS atualizadoEmEpoch "
+            + "FROM produto WHERE id = :id", nativeQuery = true)
+    Optional<ProdutoImagemMetaProjection> findImagemMetaById(@Param("id") Long id);
+
+    /**
      * Grava/substitui a imagem no banco via {@code UPDATE} <b>nativo</b> (o bytea nao passa pela
      * @Entity) e estampa {@code atualizado_em = now()} — bumpa o {@code v} da URL versionada do front
      * (SPEC-M3 §3.3, T-M3-3). Retorna a contagem de linhas afetadas: {@code 0} → produto inexistente
