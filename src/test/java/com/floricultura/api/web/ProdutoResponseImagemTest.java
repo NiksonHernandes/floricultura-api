@@ -8,7 +8,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.floricultura.api.service.JwtService;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.UUID;
+import javax.imageio.ImageIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,10 +48,6 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @AutoConfigureMockMvc
 @Testcontainers
 class ProdutoResponseImagemTest {
-
-    /** Bytes de uma "imagem" JPEG minima (magic FF D8 FF + payload) — mesmo helper do ImagemApiTest. */
-    private static final byte[] IMAGEM_JPEG =
-            new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0x01, 0x02, 0x03, 0x04};
 
     private static final BCryptPasswordEncoder ENCODER = new BCryptPasswordEncoder();
 
@@ -105,14 +105,37 @@ class ProdutoResponseImagemTest {
         return jdbc.queryForObject("SELECT id FROM produto WHERE nome = ?", Long.class, nome);
     }
 
-    /** Sobe um JPEG valido no produto via API (ADMIN, POST /produtos/{id}/imagem). */
+    /** Sobe uma imagem REAL no produto via API (ADMIN, POST /produtos/{id}/imagem). */
     private void enviarImagem(Long id) throws Exception {
-        MockMultipartFile parte =
-                new MockMultipartFile("arquivo", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, IMAGEM_JPEG);
+        MockMultipartFile parte = new MockMultipartFile(
+                "arquivo", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, imagemReal(32, 24, "jpg"));
         mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(parte)
                         .header(HttpHeaders.AUTHORIZATION, adminBearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.temImagem").value(true));
+    }
+
+    /**
+     * Gera bytes de uma imagem REAL decodavel (gradiente) no formato dado. M5.2: o upload passou a
+     * DECODIFICAR+recomprimir (AD-SQ-78) — fixture falsa (magic bytes + lixo) agora daria 400. As
+     * assercoes deste teste (temImagem + zero binario na leitura/AD-SQ-38) seguem intactas.
+     */
+    private static byte[] imagemReal(int largura, int altura, String formato) {
+        BufferedImage img = new BufferedImage(largura, altura, BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < altura; y++) {
+            for (int x = 0; x < largura; x++) {
+                int r = (x * 255) / Math.max(1, largura - 1);
+                int b = (y * 255) / Math.max(1, altura - 1);
+                img.setRGB(x, y, (r << 16) | (0x40 << 8) | b);
+            }
+        }
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(img, formato, baos);
+            return baos.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException("falha ao gerar fixture de imagem", e);
+        }
     }
 
     // ---- CA-9 (fatia LISTA): temImagem por item + zero binario no payload -------------------
