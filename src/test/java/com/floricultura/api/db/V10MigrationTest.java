@@ -102,17 +102,11 @@ class V10MigrationTest {
         assertThat(row.get("success")).isEqualTo(Boolean.TRUE);
     }
 
-    /** Head atual do schema = V10 (maior versao aplicada). */
-    @Test
-    void headDoSchemaEV10() {
-        // version IS NOT NULL descarta marcadores internos do Flyway (ex.: criacao de schema); a maior
-        // versao aplicada (por installed_rank) e a head real.
-        String head = jdbc.queryForObject(
-                "SELECT version FROM flyway_schema_history "
-                        + "WHERE success = true AND version IS NOT NULL "
-                        + "ORDER BY installed_rank DESC LIMIT 1", String.class);
-        assertThat(head).isEqualTo("10");
-    }
+    // Head-pin removido (autorizacao do dono no gate do M5.2, mesma categoria do episodio V7V8/M5):
+    // fixar "head == 10" passou a mentir assim que a V11 (produto_imagem_variante) virou o novo head, e
+    // quebraria a cada migracao futura. Este teste afere o EFEITO da V10 (ver
+    // flywayAplicouVersao10ComSucesso acima, que permanece); o pin do head atual vive no V11MigrationTest
+    // (head == "11"), que a proxima migracao atualizara.
 
     // ----- R-CA-9: 4 colunas de contraparte com os tipos certos -----
 

@@ -29,7 +29,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * construcao do {@code ProdutoImagemService}, entao o override precisa valer para todo o contexto).
  *
  * <p>Com o limite de negocio em <b>4 bytes</b>, um JPEG valido de 7 bytes — que passaria folgado no
- * default de 5 MB — e rejeitado com 400: prova que (a) {@code > limite → 400} com a mensagem exata e
+ * default de 2 MB (M5.2, era 5 MB) — e rejeitado com 400: prova que (a) {@code > limite → 400} com a mensagem exata e
  * (b) a env {@code APP_UPLOAD_IMAGEM_MAX_BYTES} <b>manda</b> no limite efetivo (o novo valor vale). O
  * teto do container (> 6MB) fica como divida P2 (smoke manual — MockMvc nao enforca).
  */
@@ -90,7 +90,7 @@ class ProdutoImagemLimiteTest {
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
                 .andExpect(jsonPath("$.error.details[0].field").value("arquivo"))
                 .andExpect(jsonPath("$.error.details[0].message")
-                        .value("Imagem excede o tamanho maximo de 5 MB."));
+                        .value("Imagem excede o tamanho maximo de 2 MB."));
 
         // Nada gravado: o GET do binario continua 404.
         mockMvc.perform(get("/api/v1/produtos/" + produtoId + "/imagem")

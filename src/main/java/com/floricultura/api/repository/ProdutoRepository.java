@@ -50,6 +50,17 @@ public interface ProdutoRepository extends JpaRepository<Produto, Long> {
     Optional<ProdutoImagemProjection> findImagemById(@Param("id") Long id);
 
     /**
+     * Leitura <b>leve</b> (SEM bytea) do original: content-type + {@code atualizado_em} em epoch-millis,
+     * para o {@code GET .../imagem} do M5.2 decidir 404 e calcular o {@code ETag} <b>sem materializar o
+     * binario</b> (SPEC-M5.2 §3.6, T-M5.2-4). Vazio → produto inexistente; {@code imagemContentType}
+     * nulo → produto sem imagem. Aliases camelCase casam {@link ProdutoImagemMetaProjection}.
+     */
+    @Query(value = "SELECT imagem_content_type AS imagemContentType, "
+            + "CAST(EXTRACT(EPOCH FROM atualizado_em) * 1000 AS BIGINT) AS atualizadoEmEpoch "
+            + "FROM produto WHERE id = :id", nativeQuery = true)
+    Optional<ProdutoImagemMetaProjection> findImagemMetaById(@Param("id") Long id);
+
+    /**
      * Grava/substitui a imagem no banco via {@code UPDATE} <b>nativo</b> (o bytea nao passa pela
      * @Entity) e estampa {@code atualizado_em = now()} — bumpa o {@code v} da URL versionada do front
      * (SPEC-M3 §3.3, T-M3-3). Retorna a contagem de linhas afetadas: {@code 0} → produto inexistente
@@ -74,6 +85,60 @@ public interface ProdutoRepository extends JpaRepository<Produto, Long> {
     @Query(value = "UPDATE produto SET imagem = NULL, imagem_content_type = NULL, "
             + "imagem_filename = NULL, atualizado_em = now() WHERE id = :id", nativeQuery = true)
     int removerImagem(@Param("id") Long id);
+
+    // ----- Variantes da imagem (M5.2/AD-SQ-38): derivados thumb/medio em tabela dedicada, binario
+    // ----- FORA da @Entity, so por query nativa dedicada (mesmo invariante da coluna produto.imagem). -----
+
+    /**
+     * Carrega <b>so</b> o binario + content-type de uma variante (thumb/medio) para servir o endpoint
+     * {@code GET /produtos/{id}/imagem?tamanho=} (SPEC-M5.2 §3.2/§3.4, T-M5.2-4). Query <b>nativa</b>
+     * projetada sobre {@code produto_imagem_variante} (V11, sem @Entity): materializa o {@code bytea} da
+     * variante <b>so ao servir</b> — lista/detalhe nunca o trazem (AD-SQ-38). Aliases em camelCase
+     * ({@code imagemContentType}) casam os getters de {@link ProdutoImagemVarianteProjection}. Vazio →
+     * variante ausente (produto legado M3 / upload que so gravou o original) → o servico cai no fallback
+     * gracioso ao original ({@code produto.imagem}), nunca 404 por variante ausente (§3.2/C-R5).
+     */
+    @Query(value = "SELECT imagem AS imagem, imagem_content_type AS imagemContentType "
+            + "FROM produto_imagem_variante WHERE produto_id = :produtoId AND tamanho = :tamanho",
+            nativeQuery = true)
+    Optional<ProdutoImagemVarianteProjection> findVarianteById(
+            @Param("produtoId") Long produtoId, @Param("tamanho") String tamanho);
+
+    /**
+     * Grava/substitui uma variante (thumb/medio) via {@code INSERT ... ON CONFLICT (produto_id, tamanho)
+     * DO UPDATE} <b>nativo</b> — o bytea nao passa pela @Entity (SPEC-M5.2 §3.4, T-M5.2-3). O parametro
+     * {@code bytes} sao os bytes crus da variante (coluna {@code imagem BYTEA}); {@code tamanhoBytes} e o
+     * tamanho em bytes gravado na coluna {@code bytes BIGINT}. {@code criado_em} e reestampado no replace
+     * (reflete o upload que gerou a variante). O CHECK do schema barra {@code tamanho} fora de
+     * thumb/medio e {@code contentType} fora de {@code image/webp}|{@code image/jpeg}.
+     */
+    @Modifying
+    @Query(value = "INSERT INTO produto_imagem_variante "
+            + "(produto_id, tamanho, imagem, imagem_content_type, largura, altura, bytes, criado_em) "
+            + "VALUES (:produtoId, :tamanho, :bytes, :contentType, :largura, :altura, :tamanhoBytes, now()) "
+            + "ON CONFLICT (produto_id, tamanho) DO UPDATE SET "
+            + "imagem = EXCLUDED.imagem, imagem_content_type = EXCLUDED.imagem_content_type, "
+            + "largura = EXCLUDED.largura, altura = EXCLUDED.altura, bytes = EXCLUDED.bytes, "
+            + "criado_em = now()", nativeQuery = true)
+    void upsertVariante(
+            @Param("produtoId") Long produtoId,
+            @Param("tamanho") String tamanho,
+            @Param("bytes") byte[] bytes,
+            @Param("contentType") String contentType,
+            @Param("largura") int largura,
+            @Param("altura") int altura,
+            @Param("tamanhoBytes") long tamanhoBytes);
+
+    /**
+     * Apaga <b>todas</b> as variantes do produto via {@code DELETE} <b>nativo</b> (SPEC-M5.2 §3.4). Usado
+     * no POST antes de reinserir (substituicao atomica, C-R9) e no DELETE de imagem (limpa variantes,
+     * C-R12). Idempotente: {@code 0} linhas quando nao ha variante (produto legado). O hard delete do
+     * produto (FC-08) ja limpa por FK {@code ON DELETE CASCADE} — este metodo cobre o replace/remocao.
+     */
+    @Modifying
+    @Query(value = "DELETE FROM produto_imagem_variante WHERE produto_id = :produtoId",
+            nativeQuery = true)
+    void deleteVariantesById(@Param("produtoId") Long produtoId);
 
     // ----- Vinculo N:N produto<->evento (M4/AD-SQ-44): replace-set por queries nativas dedicadas. -----
 

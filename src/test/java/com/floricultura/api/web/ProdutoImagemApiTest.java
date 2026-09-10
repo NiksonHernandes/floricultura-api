@@ -9,7 +9,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.floricultura.api.service.JwtService;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.UUID;
+import javax.imageio.ImageIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,12 +58,9 @@ class ProdutoImagemApiTest {
             new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0x01, 0x02, 0x03, 0x04};
     private static final String IMAGEM_JPEG_HEX = "FFD8FF01020304";
 
-    /** PNG valido (magic 89 50 4E 47 0D 0A 1A 0A + payload) — anti-spoofing CA-2/CA-4. */
+    /** PNG "valido" (magic 89 50 4E 47 0D 0A 1A 0A + payload) — usado nos casos de anti-spoofing (CA-4). */
     private static final byte[] IMAGEM_PNG =
             new byte[] {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01};
-    /** WEBP valido: RIFF(0-3) + tamanho(4-7) + WEBP(8-11) — anti-spoofing CA-2/CA-4. */
-    private static final byte[] IMAGEM_WEBP =
-            new byte[] {0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50};
 
     private static final BCryptPasswordEncoder ENCODER = new BCryptPasswordEncoder();
 
@@ -119,6 +121,39 @@ class ProdutoImagemApiTest {
                 Long.class, nome, IMAGEM_JPEG_HEX);
     }
 
+    /** Gera bytes de uma imagem REAL decodavel (gradiente suave, sem ruido) no formato dado ("png"/"jpg"). */
+    private static byte[] imagemReal(int largura, int altura, String formato) {
+        BufferedImage img = new BufferedImage(largura, altura, BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < altura; y++) {
+            for (int x = 0; x < largura; x++) {
+                int r = (x * 255) / Math.max(1, largura - 1);
+                int b = (y * 255) / Math.max(1, altura - 1);
+                img.setRGB(x, y, (r << 16) | (0x40 << 8) | b);
+            }
+        }
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(img, formato, baos);
+            return baos.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException("falha ao gerar fixture de imagem", e);
+        }
+    }
+
+    /**
+     * Confere que a variante servida (M5.2) e uma imagem DECODAVEL do tamanho esperado, no formato do
+     * pipeline (webp quando o encoder esta disponivel, senao jpeg fallback). Substitui a igualdade
+     * byte-a-byte dos testes M3 (o upload passou a decodificar+recomprimir — AD-SQ-78).
+     */
+    private static void assertVarianteServida(byte[] servido, String contentType, int largura, int altura)
+            throws IOException {
+        assertThat(contentType).isIn("image/webp", "image/jpeg");
+        BufferedImage decodificada = ImageIO.read(new ByteArrayInputStream(servido));
+        assertThat(decodificada).as("bytes servidos devem ser imagem decodavel").isNotNull();
+        assertThat(decodificada.getWidth()).isEqualTo(largura);
+        assertThat(decodificada.getHeight()).isEqualTo(altura);
+    }
+
     // ---- CA-7: servir binario + headers exatos ------------------------------------------------
 
     @Test
@@ -131,11 +166,14 @@ class ProdutoImagemApiTest {
                 .andExpect(header().string(HttpHeaders.CONTENT_TYPE, MediaType.IMAGE_JPEG_VALUE))
                 .andExpect(header().longValue(HttpHeaders.CONTENT_LENGTH, IMAGEM_JPEG.length))
                 .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, "inline"))
+                // M5.2/CA-C6: cache subiu de 30 dias para 1 ano (imutavel, seguro pela URL versionada ?v=).
                 .andExpect(header().string(
-                        HttpHeaders.CACHE_CONTROL, "public, max-age=2592000, immutable"))
+                        HttpHeaders.CACHE_CONTROL, "public, max-age=31536000, immutable"))
                 .andReturn().getResponse().getContentAsByteArray();
 
-        assertThat(corpo).isEqualTo(IMAGEM_JPEG); // bytes identicos ao gravado (CA-7)
+        // Imagem LEGADA (inserida direto em produto.imagem, sem variantes) e servida como esta — o path
+        // do original nao re-encoda no GET; a igualdade byte-a-byte segue valida para o legado (CA-7).
+        assertThat(corpo).isEqualTo(IMAGEM_JPEG);
     }
 
     /** CA-7: o parametro de cache-busting {@code ?v=} do front e ignorado pelo endpoint. */
@@ -259,8 +297,8 @@ class ProdutoImagemApiTest {
     @Test
     void enviar_jpegValidoComAdmin_devolve200TemImagemEGravaBytes() throws Exception {
         Long id = inserirProdutoSemImagem("Dalia");
-        MockMultipartFile parte =
-                new MockMultipartFile("arquivo", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, IMAGEM_JPEG);
+        MockMultipartFile parte = new MockMultipartFile(
+                "arquivo", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, imagemReal(40, 30, "jpg"));
 
         mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(parte)
                         .header(HttpHeaders.AUTHORIZATION, adminBearer))
@@ -269,56 +307,77 @@ class ProdutoImagemApiTest {
                 .andExpect(jsonPath("$.data.id").value(id))
                 .andExpect(jsonPath("$.data.temImagem").value(true));
 
-        // Bytes efetivamente gravados: o GET do binario devolve exatamente o enviado.
-        byte[] servido = mockMvc.perform(get("/api/v1/produtos/" + id + "/imagem")
+        // M5.2: o upload DECODIFICA + RECOMPRIME (nao grava os bytes como vieram). O GET default
+        // (original) devolve a variante recomprimida — decodavel, no formato do pipeline (webp ou jpeg
+        // fallback), dimensoes preservadas (40x30, sem upscale). Sem igualdade byte-a-byte (AD-SQ-78).
+        var resp = mockMvc.perform(get("/api/v1/produtos/" + id + "/imagem")
                         .header(HttpHeaders.AUTHORIZATION, userBearer))
                 .andExpect(status().isOk())
-                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, MediaType.IMAGE_JPEG_VALUE))
-                .andReturn().getResponse().getContentAsByteArray();
-        assertThat(servido).isEqualTo(IMAGEM_JPEG);
+                .andReturn().getResponse();
+        assertVarianteServida(resp.getContentAsByteArray(), resp.getContentType(), 40, 30);
     }
 
     @Test
     void enviar_pngValido_devolve200() throws Exception {
         Long id = inserirProdutoSemImagem("Begonia");
-        MockMultipartFile parte =
-                new MockMultipartFile("arquivo", "foto.png", MediaType.IMAGE_PNG_VALUE, IMAGEM_PNG);
+        MockMultipartFile parte = new MockMultipartFile(
+                "arquivo", "foto.png", MediaType.IMAGE_PNG_VALUE, imagemReal(24, 16, "png"));
 
         mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(parte)
                         .header(HttpHeaders.AUTHORIZATION, adminBearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.temImagem").value(true));
+
+        var resp = mockMvc.perform(get("/api/v1/produtos/" + id + "/imagem")
+                        .header(HttpHeaders.AUTHORIZATION, userBearer))
+                .andExpect(status().isOk())
+                .andReturn().getResponse();
+        assertVarianteServida(resp.getContentAsByteArray(), resp.getContentType(), 24, 16);
     }
 
+    /**
+     * CA-2: outra imagem valida gera variante recomprimida servivel. O upload .webp REAL decodificado
+     * (C-R7, reader TwelveMonkeys puro-Java) e coberto no {@code ProdutoImagemProcessamentoTest} com um
+     * fixture WebP gerado pela lib — aqui a fatia de API so exige "imagem valida -> 200 + variante".
+     */
     @Test
-    void enviar_webpValido_devolve200() throws Exception {
+    void enviar_imagemValida_devolve200EVarianteDecodavel() throws Exception {
         Long id = inserirProdutoSemImagem("Hortensia");
-        MockMultipartFile parte =
-                new MockMultipartFile("arquivo", "foto.webp", "image/webp", IMAGEM_WEBP);
+        MockMultipartFile parte = new MockMultipartFile(
+                "arquivo", "foto.png", MediaType.IMAGE_PNG_VALUE, imagemReal(20, 20, "png"));
 
         mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(parte)
                         .header(HttpHeaders.AUTHORIZATION, adminBearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.temImagem").value(true));
+
+        var resp = mockMvc.perform(get("/api/v1/produtos/" + id + "/imagem")
+                        .header(HttpHeaders.AUTHORIZATION, userBearer))
+                .andExpect(status().isOk())
+                .andReturn().getResponse();
+        assertVarianteServida(resp.getContentAsByteArray(), resp.getContentType(), 20, 20);
     }
 
-    /** CA-2: novo upload sobrescreve a imagem anterior (1 imagem/produto). */
+    /** CA-2: novo upload sobrescreve a imagem anterior (1 imagem/produto) — agora re-encodada. */
     @Test
     void enviar_sobrescreveImagemAnterior() throws Exception {
-        Long id = inserirProdutoComImagem("Camelia"); // ja tem JPEG
-        MockMultipartFile novo =
-                new MockMultipartFile("arquivo", "novo.png", MediaType.IMAGE_PNG_VALUE, IMAGEM_PNG);
+        Long id = inserirProdutoComImagem("Camelia"); // ja tem JPEG legado (bytes crus)
+        MockMultipartFile novo = new MockMultipartFile(
+                "arquivo", "novo.png", MediaType.IMAGE_PNG_VALUE, imagemReal(40, 30, "png"));
 
         mockMvc.perform(multipart("/api/v1/produtos/" + id + "/imagem").file(novo)
                         .header(HttpHeaders.AUTHORIZATION, adminBearer))
                 .andExpect(status().isOk());
 
-        byte[] servido = mockMvc.perform(get("/api/v1/produtos/" + id + "/imagem")
+        // M5.2: o GET devolve a NOVA variante recomprimida (webp/jpeg), 40x30, DIFERENTE do JPEG legado
+        // que estava gravado — prova a substituicao sem depender de igualdade byte-a-byte (AD-SQ-78).
+        var resp = mockMvc.perform(get("/api/v1/produtos/" + id + "/imagem")
                         .header(HttpHeaders.AUTHORIZATION, adminBearer))
                 .andExpect(status().isOk())
-                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, MediaType.IMAGE_PNG_VALUE))
-                .andReturn().getResponse().getContentAsByteArray();
-        assertThat(servido).isEqualTo(IMAGEM_PNG);
+                .andReturn().getResponse();
+        byte[] servido = resp.getContentAsByteArray();
+        assertVarianteServida(servido, resp.getContentType(), 40, 30);
+        assertThat(servido).isNotEqualTo(IMAGEM_JPEG);
     }
 
     // ---- CA-3: RBAC do upload ----------------------------------------------------------------
