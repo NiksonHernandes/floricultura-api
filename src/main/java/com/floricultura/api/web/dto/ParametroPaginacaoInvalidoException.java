@@ -17,7 +17,15 @@ public class ParametroPaginacaoInvalidoException extends RuntimeException {
     private final transient List<FieldErrorItem> details;
 
     public ParametroPaginacaoInvalidoException(List<FieldErrorItem> details) {
-        super("Parametros de paginacao invalidos.");
+        this("Parametros de paginacao invalidos.", details);
+    }
+
+    /**
+     * Variante com mensagem propria (SPEC-M6 §3.7): os mesmos {@code details}/handler servem aos
+     * parametros de <b>listagem</b> ({@code ordenarPor}/{@code direcao}), que nao sao de paginacao.
+     */
+    public ParametroPaginacaoInvalidoException(String message, List<FieldErrorItem> details) {
+        super(message);
         this.details = List.copyOf(details);
     }
 

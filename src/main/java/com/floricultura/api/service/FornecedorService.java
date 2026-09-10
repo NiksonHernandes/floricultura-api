@@ -2,7 +2,9 @@ package com.floricultura.api.service;
 
 import com.floricultura.api.domain.Fornecedor;
 import com.floricultura.api.domain.FornecedorFactory;
+import com.floricultura.api.repository.ContatoSpecs;
 import com.floricultura.api.repository.FornecedorRepository;
+import com.floricultura.api.web.dto.ContatoFiltro;
 import com.floricultura.api.web.dto.FornecedorRequest;
 import com.floricultura.api.web.dto.FornecedorResponse;
 import com.floricultura.api.web.dto.PaginaResponse;
@@ -34,9 +36,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class FornecedorService {
 
-    /** Ordenacao da lista (§3.4): {@code nome ASC}. */
-    private static final Sort ORDENACAO_PADRAO = Sort.by("nome").ascending();
-
     private final FornecedorRepository fornecedorRepository;
 
     public FornecedorService(@Lazy FornecedorRepository fornecedorRepository) {
@@ -44,17 +43,21 @@ public class FornecedorService {
     }
 
     /**
-     * Lista fornecedores paginados (CA-1), ordenados por {@code nome ASC}, com filtro opcional
-     * {@code ILIKE '%nome%'} (case-insensitive, substring). {@code nome} vazio/em branco = sem filtro.
-     * Range de paginacao invalido → {@code 400} (helper §3.4). Cada item vem com {@code produtoIds =
-     * null} — a lista <b>nunca</b> materializa o vinculo (CA-3/AD-SQ-38).
+     * Lista fornecedores paginados (CA-1), com filtro opcional {@code ILIKE '%nome%'} (case-insensitive,
+     * substring) e, desde o M6 (SPEC-M6 §3.7, CA-24/CA-25), os tri-estados {@code comTelefone}/
+     * {@code comEmail} e a ordenacao {@code ordenarPor}/{@code direcao} — tudo <b>server-side</b>, junto
+     * com a paginacao (P5). Range de paginacao invalido → {@code 400} (helper §3.4). Cada item vem com
+     * {@code produtoIds = null} — a lista <b>nunca</b> materializa o vinculo (CA-3/AD-SQ-38).
+     *
+     * <p>O {@link Pageable} vai <b>sem {@link Sort}</b> de proposito: o {@code ORDER BY} (vazios/nulos
+     * no fim + desempate {@code nome ASC, id ASC}) e fixado pela {@link ContatoSpecs}, e um {@code Sort}
+     * presente o sobrescreveria.
      */
     @Transactional(readOnly = true)
-    public PaginaResponse<FornecedorResponse> listar(Integer pagina, Integer tamanho, String nome) {
-        Pageable pageable = PaginacaoParams.paraPageable(pagina, tamanho, ORDENACAO_PADRAO);
-        Page<Fornecedor> page = (nome == null || nome.isBlank())
-                ? fornecedorRepository.findAll(pageable)
-                : fornecedorRepository.findByNomeContainingIgnoreCase(nome.trim(), pageable);
+    public PaginaResponse<FornecedorResponse> listar(
+            Integer pagina, Integer tamanho, ContatoFiltro filtro) {
+        Pageable pageable = PaginacaoParams.paraPageable(pagina, tamanho, Sort.unsorted());
+        Page<Fornecedor> page = fornecedorRepository.findAll(ContatoSpecs.de(filtro), pageable);
         return PaginaResponse.de(page, FornecedorResponse::de);
     }
 
