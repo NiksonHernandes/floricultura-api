@@ -3,23 +3,28 @@ package com.floricultura.api.repository;
 import com.floricultura.api.domain.Produto;
 import com.floricultura.api.web.dto.ProdutoFiltro;
 import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.Nulls;
 import jakarta.persistence.criteria.Order;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.springframework.data.jpa.domain.Specification;
 
 /**
- * {@link Specification} da lista de produtos (SPEC-M6 §3.6, CA-19..CA-23): filtros <b>escalares</b>
- * (nome, atalho de estoque, faixa de preco, {@code semPreco}, caracteristica e toxicidade) e a
- * ordenacao do contrato. Os multivalorados por juncao ({@code corIds}/{@code luz}/{@code eventoIds})
- * entram na T-M6-05b, por {@code EXISTS} — <b>nunca</b> {@code JOIN} (duplicaria a linha do produto e
- * corromperia {@code totalElementos}, armadilha #5 do §12).
+ * {@link Specification} da lista de produtos (SPEC-M6 §3.6, CA-17..CA-23): filtros <b>escalares</b>
+ * (nome, atalho de estoque, faixa de preco, {@code semPreco}, caracteristica e toxicidade), os
+ * multivalorados por juncao ({@code corIds}/{@code luz}/{@code eventoIds}) e a ordenacao do contrato.
+ * As juncoes entram por {@code EXISTS} correlacionado — <b>nunca</b> {@code JOIN}, que duplicaria a
+ * linha do produto e corromperia {@code totalElementos} (armadilha #5 do §12, ver {@link #existe}).
  *
  * <p><b>Criteria API, nao query nativa</b> (§3.6): preserva o {@code @Formula sazonal} e <b>nao</b>
  * materializa o {@code bytea} — a {@code @Entity} nao mapeia {@code imagem} (AD-SQ-38 intacto).
@@ -68,11 +73,46 @@ public final class ProdutoSpecs {
             if (!filtro.toxicidade().isEmpty()) {
                 predicados.add(root.get("toxicidade").in(filtro.toxicidade()));
             }
+            if (!filtro.corIds().isEmpty()) {
+                predicados.add(existe(cb, query, root, "corIds", filtro.corIds()));
+            }
+            if (!filtro.luz().isEmpty()) {
+                predicados.add(existe(cb, query, root, "necessidadeLuz", filtro.luz()));
+            }
+            if (!filtro.eventoIds().isEmpty()) {
+                predicados.add(existe(cb, query, root, "eventoIds", filtro.eventoIds()));
+            }
             if (query != null && !Long.class.equals(query.getResultType())) {
                 query.orderBy(ordenacao(filtro, root, cb));
             }
             return cb.and(predicados.toArray(new Predicate[0]));
         };
+    }
+
+    /**
+     * Dimensao multivalorada por juncao ({@code corIds}/{@code luz}/{@code eventoIds}) como
+     * <b>{@code EXISTS} correlacionado</b> — {@code exists (select 1 from <juncao> j where
+     * j.produto_id = p.id and j.<valor> in (...))}, o SQL literal do §3.6.
+     *
+     * <p><b>Por que nao {@code JOIN} (armadilha #5 do §12):</b> um produto com 2 das cores
+     * selecionadas apareceria <b>2 vezes</b> — a pagina viria com a linha repetida e, pior, o
+     * {@code count} da paginacao contaria 2, estourando {@code totalElementos}/{@code totalPaginas}.
+     * {@code DISTINCT} mascararia a lista mas nao o {@code count}. O {@code EXISTS} e semi-juncao:
+     * para/decide na 1a linha que casa, entao a cardinalidade do produto e preservada por construcao —
+     * e o mesmo predicado serve a query de dados e a de contagem, sem divergirem.
+     *
+     * <p>O {@code IN} interno e o <b>OU</b> da dimensao; o {@code and()} entre os predicados e o
+     * <b>E</b> entre dimensoes diferentes (P4). A colecao correlacionada e mapeada {@code LAZY} e
+     * {@code @Immutable} na {@code @Entity}: o {@code EXISTS} roda no banco, nada e carregado.
+     */
+    private static Predicate existe(CriteriaBuilder cb, CriteriaQuery<?> query, Root<Produto> root,
+            String vinculo, Collection<?> valores) {
+        // Nao-nulo em toda leitura (findAll/count/exists do JpaSpecificationExecutor); so o
+        // delete(Specification) passa null — caminho que produto nunca usa. Falha explicita > NPE.
+        Objects.requireNonNull(query, "Filtro multivalorado exige CriteriaQuery (nao delete).");
+        Subquery<Integer> sub = query.subquery(Integer.class);
+        Join<Produto, ?> juncao = sub.correlate(root).join(vinculo);
+        return cb.exists(sub.select(cb.literal(1)).where(juncao.in(valores)));
     }
 
     // Atalhos de estoque (§3.6/P10) — NAO sao categorias exclusivas: SEM_ESTOQUE esta contido em

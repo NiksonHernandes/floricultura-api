@@ -83,17 +83,20 @@ public class ProdutoController {
      * ordenados por {@code nome ASC}, com filtro opcional {@code nome} ({@code ILIKE '%nome%'}).
      * {@code tamanho} fora de {@code 1..100} ou {@code pagina < 0} → 400 VALIDATION_ERROR.
      *
-     * <p><b>M6 (SPEC-M6 §3.6, CA-19..CA-23):</b> filtros escalares server-side — atalho
-     * {@code estoque}, faixa {@code precoMin}/{@code precoMax} (inclusiva), {@code semPreco} e os
-     * repetiveis {@code caracteristica}/{@code toxicidade} (OU interno; <b>E</b> entre dimensoes) — e
-     * ordenacao {@code ordenarPor} ({@code nome}|{@code estoque}|{@code preco}) / {@code direcao}
+     * <p><b>M6 (SPEC-M6 §3.6, CA-17..CA-23):</b> filtros server-side — atalho {@code estoque}, faixa
+     * {@code precoMin}/{@code precoMax} (inclusiva), {@code semPreco}, os repetiveis
+     * {@code caracteristica}/{@code toxicidade} e os multivalorados por juncao {@code corIds}/
+     * {@code luz}/{@code eventoIds} (OU interno; <b>E</b> entre dimensoes — P4) — e ordenacao
+     * {@code ordenarPor} ({@code nome}|{@code estoque}|{@code preco}) / {@code direcao}
      * ({@code asc}|{@code desc}), com <b>{@code NULLS LAST} nas duas direcoes</b> e desempate
-     * {@code id ASC}. Valor fora do contrato → 400 com o {@code field} correspondente.
+     * {@code id ASC}. Valor fora do contrato → 400 com o {@code field} correspondente; ja
+     * {@code corIds}/{@code eventoIds} inexistentes apenas nao casam (CA-17/CA-18).
      */
     @Operation(summary = "Lista produtos paginados com filtros (nome, estoque=SEM_ESTOQUE|BAIXO|"
-            + "COM_ESTOQUE, precoMin/precoMax inclusivos, semPreco, caracteristica e toxicidade "
-            + "repetiveis com OU interno) e ordenacao (ordenarPor=nome|estoque|preco, direcao=asc|"
-            + "desc; produto sem preco vai para o fim nas duas direcoes, desempate por id)")
+            + "COM_ESTOQUE, precoMin/precoMax inclusivos, semPreco, e os repetiveis caracteristica, "
+            + "toxicidade, corIds, luz e eventoIds — OU dentro da mesma dimensao, E entre dimensoes "
+            + "diferentes) e ordenacao (ordenarPor=nome|estoque|preco, direcao=asc|desc; produto sem "
+            + "preco vai para o fim nas duas direcoes, desempate por id)")
     @GetMapping
     public ApiResponse<PaginaResponse<ProdutoResponse>> listar(
             @RequestParam(required = false) Integer pagina,
@@ -113,13 +116,21 @@ public class ProdutoController {
             @RequestParam(required = false) List<String> caracteristica,
             @Parameter(description = "Repetivel (OU interno): TOXICA | NAO_TOXICA")
             @RequestParam(required = false) List<String> toxicidade,
+            @Parameter(description = "Repetivel (OU interno): ids do catalogo de cores; id "
+                    + "inexistente NAO e erro, apenas nao casa")
+            @RequestParam(required = false) List<Long> corIds,
+            @Parameter(description = "Repetivel (OU interno): SOL_PLENO | MEIA_SOMBRA | SOMBRA")
+            @RequestParam(required = false) List<String> luz,
+            @Parameter(description = "Repetivel (OU interno): ids de evento; id inexistente apenas "
+                    + "nao casa")
+            @RequestParam(required = false) List<Long> eventoIds,
             @Parameter(description = "nome | estoque | preco (default nome)")
             @RequestParam(required = false) String ordenarPor,
             @Parameter(description = "asc | desc (default asc)")
             @RequestParam(required = false) String direcao,
             HttpServletRequest http) {
         ProdutoFiltro filtro = ProdutoFiltro.de(nome, estoque, precoMin, precoMax, semPreco,
-                caracteristica, toxicidade, ordenarPor, direcao);
+                caracteristica, toxicidade, ordenarPor, direcao, corIds, luz, eventoIds);
         return ApiResponse.ok(
                 produtoService.listar(pagina, tamanho, filtro), http.getRequestURI());
     }

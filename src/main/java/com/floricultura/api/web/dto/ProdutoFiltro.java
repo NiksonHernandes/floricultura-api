@@ -13,8 +13,8 @@ import java.util.Set;
  * {@code ProdutoSpecs}.
  *
  * <p><b>Semantica (P4):</b> dimensoes diferentes combinam com <b>E</b>; dentro da mesma dimensao
- * multivalorada ({@code caracteristica}, {@code toxicidade}) vale <b>OU</b> ({@code IN}). Lista vazia =
- * dimensao sem filtro. Os atalhos de estoque (P10) <b>nao</b> particionam: {@code SEM_ESTOQUE} ⊂
+ * multivalorada ({@code caracteristica}, {@code toxicidade}, {@code corIds}, {@code luz},
+ * {@code eventoIds}) vale <b>OU</b> ({@code IN}). Lista vazia = dimensao sem filtro. Os atalhos de estoque (P10) <b>nao</b> particionam: {@code SEM_ESTOQUE} ⊂
  * {@code BAIXO}, porque {@code BAIXO} repete a regra do selo {@code estoqueBaixo} (FC-13).
  *
  * <p>A validacao roda toda na fabrica {@link #de} e <b>acumula</b> um {@link FieldErrorItem} por campo
@@ -31,10 +31,14 @@ import java.util.Set;
  * @param toxicidade     toxicidade(s) aceita(s) ({@code TOXICA|NAO_TOXICA}), OU interno
  * @param ordenarPor     campo ja normalizado ({@code nome}/{@code estoque}/{@code preco})
  * @param direcao        sentido ja normalizado ({@code asc}/{@code desc})
+ * @param corIds         ids de cor aceitos (OU interno); id inexistente <b>nao</b> e erro, so nao casa
+ * @param luz            necessidade(s) de luz ({@code SOL_PLENO|MEIA_SOMBRA|SOMBRA}), OU interno
+ * @param eventoIds      ids de evento aceitos (OU interno); id inexistente so nao casa
  */
 public record ProdutoFiltro(
         String nome, String estoque, BigDecimal precoMin, BigDecimal precoMax, boolean semPreco,
-        List<String> caracteristica, List<String> toxicidade, String ordenarPor, String direcao) {
+        List<String> caracteristica, List<String> toxicidade, String ordenarPor, String direcao,
+        List<Long> corIds, List<String> luz, List<Long> eventoIds) {
 
     /** Campo de ordenacao default (§3.6) — preserva a ordem {@code nome ASC} do M2. */
     public static final String ORDENAR_POR_PADRAO = "nome";
@@ -45,17 +49,33 @@ public record ProdutoFiltro(
     private static final Set<String> ESTOQUES = Set.of("SEM_ESTOQUE", "BAIXO", "COM_ESTOQUE");
     private static final Set<String> CARACTERISTICAS = Set.of("MUDA", "JOVEM", "ADULTA");
     private static final Set<String> TOXICIDADES = Set.of("TOXICA", "NAO_TOXICA");
+    private static final Set<String> LUZES = Set.of("SOL_PLENO", "MEIA_SOMBRA", "SOMBRA");
     private static final Set<String> CAMPOS = Set.of("nome", "estoque", "preco");
     private static final Set<String> DIRECOES = Set.of("asc", "desc");
 
     /**
-     * Valida e normaliza os parametros crus da query string (§3.6). Enum fora do conjunto, preco
-     * negativo, {@code precoMin > precoMax} e {@code semPreco} combinado com a faixa acumulam erro por
-     * campo e viram {@code 400} (CA-19/CA-20/CA-21).
+     * Compat da aridade anterior (9 args, T-M6-05a) — delega sem os multivalorados por juncao (§10 #4:
+     * componente novo entra no FIM e a aridade antiga sobrevive). {@code null} aqui = dimensao sem
+     * filtro, nunca "lista vazia casa nada".
      */
     public static ProdutoFiltro de(String nome, String estoque, BigDecimal precoMin,
             BigDecimal precoMax, Boolean semPreco, List<String> caracteristica,
             List<String> toxicidade, String ordenarPor, String direcao) {
+        return de(nome, estoque, precoMin, precoMax, semPreco, caracteristica, toxicidade,
+                ordenarPor, direcao, null, null, null);
+    }
+
+    /**
+     * Valida e normaliza os parametros crus da query string (§3.6). Enum fora do conjunto, preco
+     * negativo, {@code precoMin > precoMax} e {@code semPreco} combinado com a faixa acumulam erro por
+     * campo e viram {@code 400} (CA-19/CA-20/CA-21). Ja {@code corIds}/{@code eventoIds} <b>nao</b>
+     * validam existencia: id que nao existe simplesmente nao casa (§3.6) — checar o catalogo aqui
+     * custaria 2 queries por listagem e transformaria filtro obsoleto (cor apagada) em erro de tela.
+     */
+    public static ProdutoFiltro de(String nome, String estoque, BigDecimal precoMin,
+            BigDecimal precoMax, Boolean semPreco, List<String> caracteristica,
+            List<String> toxicidade, String ordenarPor, String direcao, List<Long> corIds,
+            List<String> luz, List<Long> eventoIds) {
         List<FieldErrorItem> erros = new ArrayList<>();
 
         String atalho = (estoque == null || estoque.isBlank()) ? null : estoque.trim();
@@ -67,6 +87,8 @@ public record ProdutoFiltro(
                 "Deve ser um de: MUDA, JOVEM, ADULTA.", erros);
         List<String> toxinas = multivalorado(toxicidade, TOXICIDADES, "toxicidade",
                 "Deve ser um de: TOXICA, NAO_TOXICA.", erros);
+        List<String> luzes = multivalorado(luz, LUZES, "luz",
+                "Deve ser um de: SOL_PLENO, MEIA_SOMBRA, SOMBRA.", erros);
         boolean sem = Boolean.TRUE.equals(semPreco);
         validarPreco(precoMin, precoMax, sem, erros);
 
@@ -83,8 +105,8 @@ public record ProdutoFiltro(
         }
 
         String termo = (nome == null || nome.isBlank()) ? null : nome.trim();
-        return new ProdutoFiltro(
-                termo, atalho, precoMin, precoMax, sem, portes, toxinas, campo, sentido);
+        return new ProdutoFiltro(termo, atalho, precoMin, precoMax, sem, portes, toxinas, campo,
+                sentido, ids(corIds), luzes, ids(eventoIds));
     }
 
     /** {@code true} quando a ordenacao e ascendente (default). */
@@ -126,6 +148,14 @@ public record ProdutoFiltro(
             erros.add(new FieldErrorItem(campo, mensagem));
         }
         return dedup;
+    }
+
+    // Dimensao multivalorada de IDS (§3.6): nulos descartados e dedup, SEM validar existencia — o
+    // contrato diz que id inexistente "so nao casa". Lista vazia = sem filtro (a Specification nem
+    // monta o EXISTS: um `IN ()` vazio filtraria tudo fora, invertendo o contrato).
+    private static List<Long> ids(List<Long> valores) {
+        return valores == null ? List.of()
+                : valores.stream().filter(v -> v != null).distinct().toList();
     }
 
     private static String normalizar(String valor, String padrao) {
