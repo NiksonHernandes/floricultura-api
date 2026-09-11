@@ -8,6 +8,7 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -15,15 +16,16 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 /**
- * Acesso a persistencia de {@link Produto} (SPEC-M2 §8). O {@code findAll(Pageable)} herdado cobre a
- * listagem paginada/ordenada (AD-SQ-29); {@code findByNomeContainingIgnoreCase} implementa o filtro
- * {@code ILIKE '%nome%'} (case-insensitive, substring) do contrato de listagem (§3.3) consumido na
- * onda 2 (T-M2-2).
+ * Acesso a persistencia de {@link Produto} (SPEC-M2 §8). Desde o M6 (SPEC-M6 §3.6) a listagem
+ * paginada/filtrada/ordenada roda por {@code findAll(Specification, Pageable)} do
+ * {@link JpaSpecificationExecutor} — quem monta o predicado e o {@code ORDER BY} e a
+ * {@code ProdutoSpecs}. A derived query {@code findByNomeContainingIgnoreCase} foi <b>removida</b>
+ * junto com seu ultimo chamador: o filtro por nome vive agora no {@code FiltroTexto} (que escapa
+ * {@code %}/{@code _}, preservando a semantica que o Spring Data dava de graca).
  */
 @Repository
-public interface ProdutoRepository extends JpaRepository<Produto, Long> {
-
-    Page<Produto> findByNomeContainingIgnoreCase(String nome, Pageable pageable);
+public interface ProdutoRepository
+        extends JpaRepository<Produto, Long>, JpaSpecificationExecutor<Produto> {
 
     /**
      * Carrega o produto com <b>lock pessimista de escrita</b> ({@code SELECT ... FOR UPDATE}) para a

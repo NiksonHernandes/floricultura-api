@@ -10,16 +10,19 @@ import com.floricultura.api.web.dto.AtualizarProdutoRequest;
 import com.floricultura.api.web.dto.CriarProdutoRequest;
 import com.floricultura.api.web.dto.PaginaResponse;
 import com.floricultura.api.web.dto.ParametroPaginacaoInvalidoException;
+import com.floricultura.api.web.dto.ProdutoFiltro;
 import com.floricultura.api.web.dto.ProdutoRelacionamentosResponse;
 import com.floricultura.api.web.dto.ProdutoResponse;
 import com.floricultura.api.web.error.ErrorCode;
 import com.floricultura.api.web.response.ApiError;
 import com.floricultura.api.web.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.math.BigDecimal;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -79,16 +82,46 @@ public class ProdutoController {
      * CA-2/CA-3/CA-4: lista produtos paginados (default {@code pagina=0}, {@code tamanho=20}),
      * ordenados por {@code nome ASC}, com filtro opcional {@code nome} ({@code ILIKE '%nome%'}).
      * {@code tamanho} fora de {@code 1..100} ou {@code pagina < 0} → 400 VALIDATION_ERROR.
+     *
+     * <p><b>M6 (SPEC-M6 §3.6, CA-19..CA-23):</b> filtros escalares server-side — atalho
+     * {@code estoque}, faixa {@code precoMin}/{@code precoMax} (inclusiva), {@code semPreco} e os
+     * repetiveis {@code caracteristica}/{@code toxicidade} (OU interno; <b>E</b> entre dimensoes) — e
+     * ordenacao {@code ordenarPor} ({@code nome}|{@code estoque}|{@code preco}) / {@code direcao}
+     * ({@code asc}|{@code desc}), com <b>{@code NULLS LAST} nas duas direcoes</b> e desempate
+     * {@code id ASC}. Valor fora do contrato → 400 com o {@code field} correspondente.
      */
-    @Operation(summary = "Lista produtos paginados (pagina/tamanho/nome), ordenados por nome ASC")
+    @Operation(summary = "Lista produtos paginados com filtros (nome, estoque=SEM_ESTOQUE|BAIXO|"
+            + "COM_ESTOQUE, precoMin/precoMax inclusivos, semPreco, caracteristica e toxicidade "
+            + "repetiveis com OU interno) e ordenacao (ordenarPor=nome|estoque|preco, direcao=asc|"
+            + "desc; produto sem preco vai para o fim nas duas direcoes, desempate por id)")
     @GetMapping
     public ApiResponse<PaginaResponse<ProdutoResponse>> listar(
             @RequestParam(required = false) Integer pagina,
             @RequestParam(required = false) Integer tamanho,
             @RequestParam(required = false) String nome,
+            @Parameter(description = "Atalhos (NAO exclusivos): SEM_ESTOQUE (atual = 0) | BAIXO "
+                    + "(atual <= minimo, inclui o zero) | COM_ESTOQUE (atual > 0)")
+            @RequestParam(required = false) String estoque,
+            @Parameter(description = "Piso inclusivo do preco (>= 0)")
+            @RequestParam(required = false) BigDecimal precoMin,
+            @Parameter(description = "Teto inclusivo do preco (>= 0); precoMin > precoMax → 400")
+            @RequestParam(required = false) BigDecimal precoMax,
+            @Parameter(description = "true = so produtos sem preco definido; nao combina com "
+                    + "precoMin/precoMax (→ 400)")
+            @RequestParam(required = false) Boolean semPreco,
+            @Parameter(description = "Repetivel (OU interno): MUDA | JOVEM | ADULTA")
+            @RequestParam(required = false) List<String> caracteristica,
+            @Parameter(description = "Repetivel (OU interno): TOXICA | NAO_TOXICA")
+            @RequestParam(required = false) List<String> toxicidade,
+            @Parameter(description = "nome | estoque | preco (default nome)")
+            @RequestParam(required = false) String ordenarPor,
+            @Parameter(description = "asc | desc (default asc)")
+            @RequestParam(required = false) String direcao,
             HttpServletRequest http) {
+        ProdutoFiltro filtro = ProdutoFiltro.de(nome, estoque, precoMin, precoMax, semPreco,
+                caracteristica, toxicidade, ordenarPor, direcao);
         return ApiResponse.ok(
-                produtoService.listar(pagina, tamanho, nome), http.getRequestURI());
+                produtoService.listar(pagina, tamanho, filtro), http.getRequestURI());
     }
 
     /** CA-5/CA-15: detalha produto por id (com {@code estoqueBaixo}); inexistente → 404. */

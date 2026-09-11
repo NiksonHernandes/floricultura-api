@@ -2,8 +2,6 @@ package com.floricultura.api.repository;
 
 import com.floricultura.api.domain.Cliente;
 import java.util.List;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
@@ -11,10 +9,11 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 /**
- * Acesso a persistencia de {@link Cliente} (SPEC-M5 §3.5). O {@code findAll(Pageable)} herdado cobre a
- * listagem paginada/ordenada ({@code nome ASC}) e {@code findByNomeContainingIgnoreCase} implementa o
- * filtro {@code ILIKE '%nome%'} (case-insensitive, substring) do contrato §3.4. O {@code existsById}
- * herdado serve ao hard delete.
+ * Acesso a persistencia de {@link Cliente} (SPEC-M5 §3.5). Desde o M6 (SPEC-M6 §3.7) a listagem
+ * paginada/filtrada/ordenada roda por {@code findAll(Specification, Pageable)} do
+ * {@link JpaSpecificationExecutor}, com o predicado e o {@code ORDER BY} vindos da
+ * {@link ContatoSpecs} — a derived query {@code findByNomeContainingIgnoreCase} ficou sem chamador e
+ * foi removida. O {@code existsById} herdado serve ao hard delete.
  *
  * <p><b>Revisao 2026-09-04 (AD-SQ-65):</b> o vinculo cliente↔produto e <b>derivado da movimentacao</b>
  * (SAIDAS deste cliente), nao mais junção N:N editavel. {@code findNomeById} resolve o snapshot do nome
@@ -25,8 +24,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface ClienteRepository
         extends JpaRepository<Cliente, Long>, JpaSpecificationExecutor<Cliente> {
-
-    Page<Cliente> findByNomeContainingIgnoreCase(String nome, Pageable pageable);
 
     /**
      * Projecao escalar do nome do cliente para o snapshot da contraparte no ledger (RB-3, §R3.3): resolve

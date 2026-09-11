@@ -4,12 +4,14 @@ import com.floricultura.api.domain.Produto;
 import com.floricultura.api.domain.ProdutoFactory;
 import com.floricultura.api.repository.EventoRepository;
 import com.floricultura.api.repository.ProdutoRepository;
+import com.floricultura.api.repository.ProdutoSpecs;
 import com.floricultura.api.repository.ReferenciaSimplesProjection;
 import com.floricultura.api.web.dto.AtualizarProdutoRequest;
 import com.floricultura.api.web.dto.CorReferencia;
 import com.floricultura.api.web.dto.CriarProdutoRequest;
 import com.floricultura.api.web.dto.PaginaResponse;
 import com.floricultura.api.web.dto.PaginacaoParams;
+import com.floricultura.api.web.dto.ProdutoFiltro;
 import com.floricultura.api.web.dto.ProdutoRelacionamentosResponse;
 import com.floricultura.api.web.dto.ProdutoResponse;
 import com.floricultura.api.web.dto.ReferenciaSimples;
@@ -37,9 +39,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ProdutoService {
 
-    /** Ordenacao MVP da lista de produtos (§3.3): {@code nome ASC}; o helper nasce extensivel. */
-    private static final Sort ORDENACAO_PADRAO = Sort.by(Sort.Direction.ASC, "nome");
-
     /** Valores aceitos em {@code necessidadeLuz} (SPEC-M6 §3.3), espelho do CHECK {@code ck_pnl_luz}. */
     private static final Set<String> LUZES = Set.of("SOL_PLENO", "MEIA_SOMBRA", "SOMBRA");
 
@@ -60,17 +59,22 @@ public class ProdutoService {
     }
 
     /**
-     * Lista produtos paginados (CA-2/CA-3), ordenados por {@code nome ASC}, com filtro opcional
-     * {@code ILIKE '%nome%'} (case-insensitive, substring — CA-4). {@code nome} vazio/em branco = sem
-     * filtro. Parametros de paginacao fora do range → {@code 400} (helper §3.3). Pagina alem do total
-     * → pagina vazia com {@code ultima=true} (§4).
+     * Lista produtos paginados (CA-2/CA-3) com o filtro do {@link ProdutoFiltro} — nome
+     * ({@code ILIKE '%nome%'}, CA-4), atalho de estoque, faixa de preco/{@code semPreco},
+     * caracteristica e toxicidade (SPEC-M6 §3.6, CA-19..CA-23) — tudo <b>server-side</b>, junto com a
+     * paginacao (P5). Sem params, o comportamento e o herdado do M2: todos, {@code nome ASC}.
+     * Paginacao fora do range → {@code 400} (helper §3.3); pagina alem do total → vazia com
+     * {@code ultima=true} (§4).
+     *
+     * <p>O {@link Pageable} vai <b>sem {@link Sort}</b> de proposito (mesmo desenho de
+     * {@code ClienteService}): o {@code ORDER BY} com {@code NULLS LAST} + desempate {@code id ASC} e
+     * fixado pela {@code ProdutoSpecs}, e um {@code Sort} presente o sobrescreveria.
      */
     @Transactional(readOnly = true)
-    public PaginaResponse<ProdutoResponse> listar(Integer pagina, Integer tamanho, String nome) {
-        Pageable pageable = PaginacaoParams.paraPageable(pagina, tamanho, ORDENACAO_PADRAO);
-        Page<Produto> page = (nome == null || nome.isBlank())
-                ? produtoRepository.findAll(pageable)
-                : produtoRepository.findByNomeContainingIgnoreCase(nome.trim(), pageable);
+    public PaginaResponse<ProdutoResponse> listar(
+            Integer pagina, Integer tamanho, ProdutoFiltro filtro) {
+        Pageable pageable = PaginacaoParams.paraPageable(pagina, tamanho, Sort.unsorted());
+        Page<Produto> page = produtoRepository.findAll(ProdutoSpecs.de(filtro), pageable);
         return PaginaResponse.de(page, ProdutoResponse::de);
     }
 
