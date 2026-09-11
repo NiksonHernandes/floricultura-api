@@ -2,6 +2,7 @@ package com.floricultura.api.web;
 
 import com.floricultura.api.config.OpenApiConfig;
 import com.floricultura.api.service.AlturaSemPorteException;
+import com.floricultura.api.service.AtributoDoProdutoInvalidoException;
 import com.floricultura.api.service.EventoInexistenteException;
 import com.floricultura.api.service.ProdutoNaoEncontradoException;
 import com.floricultura.api.service.ProdutoService;
@@ -117,7 +118,9 @@ public class ProdutoController {
      */
     @Operation(summary = "Cria produto (ADMIN) → 201 com estoqueAtual=0; aceita os atributos botanicos "
             + "opcionais caracteristica (MUDA|JOVEM|ADULTA), alturaCm (1..10000 cm inteiros, exige "
-            + "porte JOVEM/ADULTA) e toxicidade (TOXICA|NAO_TOXICA; ausente = nao informado)")
+            + "porte JOVEM/ADULTA), toxicidade (TOXICA|NAO_TOXICA; ausente = nao informado) e os "
+            + "multivalorados necessidadeLuz (SOL_PLENO|MEIA_SOMBRA|SOMBRA) e corIds (ids do catalogo "
+            + "de cores; inexistente → 400 antes de qualquer escrita)")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ProdutoResponse> criar(
@@ -131,7 +134,8 @@ public class ProdutoController {
      * 403 (SecurityConfig).
      */
     @Operation(summary = "Atualiza produto (ADMIN) → 200; nunca toca estoqueAtual (404 se inexistente). "
-            + "Os atributos botanicos escalares sao substituidos por inteiro: valor grava, null limpa")
+            + "Os atributos botanicos escalares sao substituidos por inteiro: valor grava, null limpa. "
+            + "Ja necessidadeLuz e corIds sao replace-set como eventoIds: null nao altera, [] limpa")
     @PutMapping("/{id}")
     public ApiResponse<ProdutoResponse> atualizar(
             @PathVariable Long id,
@@ -175,8 +179,8 @@ public class ProdutoController {
 
     /**
      * 400 VALIDATION_ERROR com {@code field:"alturaCm"}: altura informada sem porte {@code JOVEM/ADULTA}
-     * no POST/PUT (M6/R13, CA-10). Sem este handler a violacao cairia no CHECK do banco e viraria
-     * <b>500</b> (§12 #15a).
+     * no POST/PUT (M6/R13, CA-10). Sem a validacao de servico a violacao cairia no CHECK do banco e
+     * viraria <b>409</b> generico, sem {@code field} (§12 #15a/AD-SQ-119 — medido por mutacao).
      */
     @ExceptionHandler(AlturaSemPorteException.class)
     public ResponseEntity<ApiResponse<Object>> handleAlturaSemPorte(
@@ -191,6 +195,20 @@ public class ProdutoController {
     @ExceptionHandler(EventoInexistenteException.class)
     public ResponseEntity<ApiResponse<Object>> handleEventoInexistente(
             EventoInexistenteException ex, HttpServletRequest http) {
+        ApiError error = new ApiError(
+                ErrorCode.VALIDATION_ERROR.name(), ex.getMessage(), ex.getDetails());
+        return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.status())
+                .body(ApiResponse.fail(error, http.getRequestURI()));
+    }
+
+    /**
+     * 400 com {@code field:"corIds"} / {@code "necessidadeLuz"}: atributo multivalorado invalido,
+     * barrado no servico ANTES de escrever (M6/R10, CA-11/CA-12) — e nao o 409 do CHECK, que viria sem
+     * {@code field} (AD-SQ-119).
+     */
+    @ExceptionHandler(AtributoDoProdutoInvalidoException.class)
+    public ResponseEntity<ApiResponse<Object>> handleAtributoInvalido(
+            AtributoDoProdutoInvalidoException ex, HttpServletRequest http) {
         ApiError error = new ApiError(
                 ErrorCode.VALIDATION_ERROR.name(), ex.getMessage(), ex.getDetails());
         return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.status())

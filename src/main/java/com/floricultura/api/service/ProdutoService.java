@@ -6,6 +6,7 @@ import com.floricultura.api.repository.EventoRepository;
 import com.floricultura.api.repository.ProdutoRepository;
 import com.floricultura.api.repository.ReferenciaSimplesProjection;
 import com.floricultura.api.web.dto.AtualizarProdutoRequest;
+import com.floricultura.api.web.dto.CorReferencia;
 import com.floricultura.api.web.dto.CriarProdutoRequest;
 import com.floricultura.api.web.dto.PaginaResponse;
 import com.floricultura.api.web.dto.PaginacaoParams;
@@ -14,6 +15,8 @@ import com.floricultura.api.web.dto.ProdutoResponse;
 import com.floricultura.api.web.dto.ReferenciaSimples;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -37,17 +40,23 @@ public class ProdutoService {
     /** Ordenacao MVP da lista de produtos (§3.3): {@code nome ASC}; o helper nasce extensivel. */
     private static final Sort ORDENACAO_PADRAO = Sort.by(Sort.Direction.ASC, "nome");
 
+    /** Valores aceitos em {@code necessidadeLuz} (SPEC-M6 §3.3), espelho do CHECK {@code ck_pnl_luz}. */
+    private static final Set<String> LUZES = Set.of("SOL_PLENO", "MEIA_SOMBRA", "SOMBRA");
+
     private final ProdutoRepository produtoRepository;
     private final EventoRepository eventoRepository;
     private final ProdutoEventoVinculoService vinculoService;
+    private final ProdutoAtributosVinculoService atributosVinculoService;
 
     public ProdutoService(
             @Lazy ProdutoRepository produtoRepository,
             @Lazy EventoRepository eventoRepository,
-            ProdutoEventoVinculoService vinculoService) {
+            ProdutoEventoVinculoService vinculoService,
+            ProdutoAtributosVinculoService atributosVinculoService) {
         this.produtoRepository = produtoRepository;
         this.eventoRepository = eventoRepository;
         this.vinculoService = vinculoService;
+        this.atributosVinculoService = atributosVinculoService;
     }
 
     /**
@@ -73,8 +82,7 @@ public class ProdutoService {
     public ProdutoResponse detalhar(Long id) {
         Produto produto = produtoRepository.findById(id)
                 .orElseThrow(ProdutoNaoEncontradoException::new);
-        // Detalhe (§3.4/CA-9): carrega os eventoIds vinculados (na lista vem null, evita N+1).
-        return ProdutoResponse.deDetalhe(produto, produtoRepository.findEventoIdsByProdutoId(id));
+        return detalheDe(produto, id);
     }
 
     /**
@@ -113,8 +121,11 @@ public class ProdutoService {
     public ProdutoResponse criar(CriarProdutoRequest req) {
         // Valida eventoIds ANTES de qualquer escrita (CA-11: id inexistente → 400, nada persiste).
         List<Long> eventoIds = normalizarEValidarEventos(req.eventoIds());
-        // M6/R13: regra cruzada da altura ANTES do banco (CA-10) — senao o CHECK viraria 500 (§12 #15).
+        // M6/R13: regra cruzada da altura ANTES do banco (CA-10) — senao o CHECK viraria 409 (§12 #15).
         validarAltura(req.caracteristica(), req.alturaCm());
+        // M6/R9/R10: multivalorados normalizados e validados no MESMO ponto, antes de escrever.
+        List<String> luzes = normalizarEValidarLuzes(req.necessidadeLuz());
+        List<Long> corIds = normalizarEValidarCores(req.corIds());
         Produto produto = ProdutoFactory.novo(
                 req.nome(),
                 req.descricao(),
@@ -127,9 +138,10 @@ public class ProdutoService {
         if (eventoIds != null) {
             vinculoService.substituir(id, eventoIds); // replace-set atomico (transacao propria)
         }
+        aplicarMultivalorados(id, luzes, corIds);
         Produto salvo = produtoRepository.findById(id)
                 .orElseThrow(ProdutoNaoEncontradoException::new);
-        return ProdutoResponse.deDetalhe(salvo, produtoRepository.findEventoIdsByProdutoId(id));
+        return detalheDe(salvo, id);
     }
 
     /**
@@ -143,8 +155,10 @@ public class ProdutoService {
         List<Long> eventoIds = normalizarEValidarEventos(req.eventoIds());
         // Escalares sao substituidos por inteiro no PUT, entao o par do payload JA E o estado
         // resultante do update — inclusive no caso "so troquei a caracteristica para MUDA" numa linha
-        // que tinha altura: se o payload nao limpar alturaCm, isto e 400 (CA-10), nunca 500.
+        // que tinha altura: se o payload nao limpar alturaCm, isto e 400 (CA-10), nunca 409.
         validarAltura(req.caracteristica(), req.alturaCm());
+        List<String> luzes = normalizarEValidarLuzes(req.necessidadeLuz());
+        List<Long> corIds = normalizarEValidarCores(req.corIds());
         Produto produto = produtoRepository.findById(id)
                 .orElseThrow(ProdutoNaoEncontradoException::new);
         produto.setNome(req.nome());
@@ -159,8 +173,8 @@ public class ProdutoService {
         if (eventoIds != null) {
             vinculoService.substituir(id, eventoIds); // replace-set (junta esta transacao)
         }
-        // Le os eventoIds atuais (query nativa, fora do 1o nivel) para o detalhe da resposta.
-        return ProdutoResponse.deDetalhe(produto, produtoRepository.findEventoIdsByProdutoId(id));
+        aplicarMultivalorados(id, luzes, corIds);
+        return detalheDe(produto, id);
     }
 
     /**
@@ -170,6 +184,10 @@ public class ProdutoService {
      * banco e anula {@code produto_id} no ledger — a trigger refinada na V4/AD-SQ-34 permite exatamente
      * esse UPDATE, preservando {@code produto_nome} (o ledger sobrevive). A entity {@link Produto} nao
      * mapeia colecao de movimentacoes, entao o Hibernate emite so o {@code DELETE FROM produto}.
+     *
+     * <p><b>M6/CA-16:</b> {@code produto_cor} e {@code produto_necessidade_luz} somem pelo {@code ON
+     * DELETE CASCADE} da FK de {@code produto_id} (V12) — <b>nenhum</b> delete extra aqui. O catalogo de
+     * cores permanece: o {@code RESTRICT} vale no outro lado da juncao (excluir COR em uso da 409 — R6).
      */
     @Transactional
     public void deletar(Long id) {
@@ -187,8 +205,9 @@ public class ProdutoService {
      * <p>Cobre os <b>dois</b> casos do contrato: {@code MUDA + altura} e {@code caracteristica = null +
      * altura} (o buraco da logica ternaria que a AD-SQ-89 fechou no CHECK). Sem altura, qualquer
      * caracteristica passa — inclusive {@code null} (P12: produto pre-M6 e valido). O {@code
-     * ck_produto_altura_exige_porte} continua como segunda linha de defesa, mas nao deve ser atingido:
-     * se fosse, viraria 500 em vez do 400 do contrato (§12 #15a).
+     * ck_produto_altura_exige_porte} continua como 2a linha de defesa, mas nao deve ser atingido: se
+     * fosse, a {@code DataIntegrityViolationException} viraria <b>409</b> sem {@code field}, e nao o 400
+     * do contrato — sintoma medido por mutacao (§12 #15a/AD-SQ-119; o "500" antes citado nao acontece).
      */
     private static void validarAltura(String caracteristica, Integer alturaCm) {
         if (alturaCm == null) {
@@ -210,6 +229,71 @@ public class ProdutoService {
         produto.setCaracteristica(caracteristica);
         produto.setAlturaCm(alturaCm);
         produto.setToxicidade(toxicidade);
+    }
+
+    /**
+     * Detalhe (§3.4): {@code eventoIds} + as 2 colecoes, cada uma por <b>query nativa dedicada</b>
+     * (§3.5) — nada mapeado na @Entity, entao a vitrine hidrata sem coluna nova (§12 #3).
+     */
+    private ProdutoResponse detalheDe(Produto produto, Long id) {
+        List<CorReferencia> cores = produtoRepository.findCoresByProdutoId(id).stream()
+                .map(c -> new CorReferencia(c.getId(), c.getNome(), c.getHex()))
+                .toList();
+        return ProdutoResponse.deDetalhe(produto, produtoRepository.findEventoIdsByProdutoId(id),
+                produtoRepository.findLuzesByProdutoId(id), cores);
+    }
+
+    /**
+     * Aplica os replace-sets (§3.5/R9) depois de o produto existir. Cada conjunto so e tocado quando o
+     * campo <b>veio</b> ({@code null} = nao altera; {@code []} = limpa), como {@code eventoIds}.
+     */
+    private void aplicarMultivalorados(Long id, List<String> luzes, List<Long> corIds) {
+        if (luzes != null) {
+            atributosVinculoService.substituirLuzes(id, luzes);
+        }
+        if (corIds != null) {
+            atributosVinculoService.substituirCores(id, corIds);
+        }
+    }
+
+    /**
+     * Normaliza/valida {@code corIds} (§3.3/R9/R10, CA-11): {@code null} = nao altera · {@code []} =
+     * limpa · presente = deduplicados. TODOS os ids sao conferidos em <b>uma unica query</b> (§3.5),
+     * <b>antes</b> de qualquer escrita → 400 {@code field=corIds} com o conjunto anterior intacto.
+     * Nunca {@code findById} em laco.
+     */
+    private List<Long> normalizarEValidarCores(List<Long> corIds) {
+        if (corIds == null) {
+            return null;
+        }
+        List<Long> dedup = corIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (dedup.isEmpty()) {
+            return List.of(); // tambem evita o `IN ()`, que e erro de sintaxe no Postgres
+        }
+        Set<Long> existentes = Set.copyOf(produtoRepository.findCorIdsExistentes(dedup));
+        for (Long corId : dedup) {
+            if (!existentes.contains(corId)) {
+                throw AtributoDoProdutoInvalidoException.corInexistente(corId);
+            }
+        }
+        return dedup;
+    }
+
+    /**
+     * Normaliza/valida {@code necessidadeLuz} (§3.3/R9, CA-12): mesma semantica de {@code corIds}.
+     * Fora de {@link #LUZES} → 400 {@code field=necessidadeLuz} antes de escrever.
+     */
+    private static List<String> normalizarEValidarLuzes(List<String> necessidadeLuz) {
+        if (necessidadeLuz == null) {
+            return null;
+        }
+        List<String> dedup = necessidadeLuz.stream().filter(Objects::nonNull).distinct().toList();
+        for (String luz : dedup) {
+            if (!LUZES.contains(luz)) {
+                throw AtributoDoProdutoInvalidoException.luzInvalida(luz);
+            }
+        }
+        return dedup;
     }
 
     /**

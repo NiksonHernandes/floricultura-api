@@ -34,6 +34,12 @@ import java.util.List;
  *                      escalares sao substituidos integralmente, o resultante e o proprio par
  *                      ({@code caracteristica}, {@code alturaCm}) do payload
  * @param toxicidade    {@code TOXICA|NAO_TOXICA}; escalar, {@code null} = nao informado (R8/P2)
+ * @param necessidadeLuz <b>replace-set</b> (e NAO escalar): {@code null} = nao altera · {@code []} =
+ *                      limpa · repetidos deduplicados (R9) — semantica identica a de {@code eventoIds},
+ *                      deliberada para o form ter uma mentalidade so (§3.3). Fora de
+ *                      {@code {SOL_PLENO,MEIA_SOMBRA,SOMBRA}} → 400 {@code field=necessidadeLuz}
+ * @param corIds        replace-set de ids de {@code cor}, mesma semantica. Id inexistente → 400
+ *                      {@code field=corIds} e o conjunto anterior fica INTACTO (R10/CA-11)
  */
 public record AtualizarProdutoRequest(
         @NotBlank @Size(min = 2, max = 150) String nome,
@@ -51,7 +57,9 @@ public record AtualizarProdutoRequest(
                 @Max(value = 10000, message = "A altura deve estar entre 1 e 10000 cm.")
                 Integer alturaCm,
         @Pattern(regexp = "TOXICA|NAO_TOXICA",
-                message = "toxicidade deve ser um de: TOXICA, NAO_TOXICA") String toxicidade) {
+                message = "toxicidade deve ser um de: TOXICA, NAO_TOXICA") String toxicidade,
+        List<String> necessidadeLuz,
+        List<Long> corIds) {
 
     /**
      * Construtor de compatibilidade (M2): 6 campos, sem {@code eventoIds} ⇒ {@code null} = "vinculos
@@ -65,12 +73,24 @@ public record AtualizarProdutoRequest(
 
     /**
      * Construtor de compatibilidade (M4): 7 campos, sem os atributos botanicos do M6 ⇒ os 3 escalares
-     * chegam {@code null} (e o PUT, sendo escalar, os LIMPA — §3.3). Os componentes novos entram ao FIM
-     * do record justamente para que estes dois ctors posicionais sigam validos (§3.4/§12 #4).
+     * chegam {@code null} (e o PUT, sendo escalar, os LIMPA — §3.3) e os 2 multivalorados chegam
+     * {@code null}, que por serem replace-set significa "nao altera o conjunto" (R9) — nao limpa. Os
+     * componentes novos entram ao FIM do record para que estes ctors posicionais sigam validos (§12 #4).
      */
     public AtualizarProdutoRequest(String nome, String descricao, String unidadeMedida,
             BigDecimal estoqueMinimo, BigDecimal preco, String imagemUrl, List<Long> eventoIds) {
         this(nome, descricao, unidadeMedida, estoqueMinimo, preco, imagemUrl, eventoIds,
-                null, null, null);
+                null, null, null, null, null);
+    }
+
+    /**
+     * Compat (T-M6-02a): 10 campos ⇒ os 2 multivalorados ficam {@code null}, que em replace-set
+     * significa "nao altera o conjunto" (R9) — nao limpa. Mesma politica (§3.4/§12 #4).
+     */
+    public AtualizarProdutoRequest(String nome, String descricao, String unidadeMedida,
+            BigDecimal estoqueMinimo, BigDecimal preco, String imagemUrl, List<Long> eventoIds,
+            String caracteristica, Integer alturaCm, String toxicidade) {
+        this(nome, descricao, unidadeMedida, estoqueMinimo, preco, imagemUrl, eventoIds,
+                caracteristica, alturaCm, toxicidade, null, null);
     }
 }

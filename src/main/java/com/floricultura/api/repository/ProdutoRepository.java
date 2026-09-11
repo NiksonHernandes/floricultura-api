@@ -2,6 +2,7 @@ package com.floricultura.api.repository;
 
 import com.floricultura.api.domain.Produto;
 import jakarta.persistence.LockModeType;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -190,6 +191,57 @@ public interface ProdutoRepository extends JpaRepository<Produto, Long> {
     @Query(value = "INSERT INTO evento_produto (produto_id, evento_id) VALUES (:produtoId, :eventoId) "
             + "ON CONFLICT DO NOTHING", nativeQuery = true)
     void inserirVinculo(@Param("produtoId") Long produtoId, @Param("eventoId") Long eventoId);
+
+    // ----- Atributos MULTIVALORADOS (M6/§3.5): `produto_cor` e `produto_necessidade_luz` SEM @Entity,
+    // ----- so por query nativa dedicada (padrao de evento_produto/AD-SQ-44 e da variante/AD-SQ-76).
+    // ----- Mapea-las poria colecao na @Entity e quebraria a hidratacao de `buscarPorEvento` (§12 #3).
+
+    /**
+     * Cores do produto para o <b>detalhe</b> (§3.4), com {@code hex}, ordenadas por {@code c.nome ASC}.
+     * Aliases casam {@link CorReferenciaProjection}. Na lista nunca e chamada (CA-13/AD-SQ-38).
+     */
+    @Query(value = "SELECT c.id AS id, c.nome AS nome, c.hex AS hex FROM produto_cor pc "
+            + "JOIN cor c ON c.id = pc.cor_id WHERE pc.produto_id = :produtoId ORDER BY c.nome",
+            nativeQuery = true)
+    List<CorReferenciaProjection> findCoresByProdutoId(@Param("produtoId") Long produtoId);
+
+    /**
+     * Ids de {@code corIds} que <b>existem</b> no catalogo — <b>uma unica query</b> para validar o
+     * payload antes de qualquer escrita (§3.5/R10/CA-11); nunca {@code findById} em laco. Cumpre o papel
+     * do {@code contarCoresInexistentes} do §3.5 devolvendo os <b>ids</b> e nao um {@code long}: o §3.3
+     * exige o id na mensagem, que a contagem nao revela. Nao invocar com lista vazia (o {@code IN ()}
+     * e erro de sintaxe no Postgres).
+     */
+    @Query(value = "SELECT id FROM cor WHERE id IN (:corIds)", nativeQuery = true)
+    List<Long> findCorIdsExistentes(@Param("corIds") Collection<Long> corIds);
+
+    /** Apaga todos os vinculos de cor do produto (1o passo do replace-set — §3.5/R9). */
+    @Modifying
+    @Query(value = "DELETE FROM produto_cor WHERE produto_id = :produtoId", nativeQuery = true)
+    void removerCoresDoProduto(@Param("produtoId") Long produtoId);
+
+    /** Insere um vinculo produto&lt;-&gt;cor (2o passo do replace-set); {@code ON CONFLICT} = idempotente. */
+    @Modifying
+    @Query(value = "INSERT INTO produto_cor (produto_id, cor_id) VALUES (:produtoId, :corId) "
+            + "ON CONFLICT DO NOTHING", nativeQuery = true)
+    void inserirCor(@Param("produtoId") Long produtoId, @Param("corId") Long corId);
+
+    /** Necessidades de luz do produto para o <b>detalhe</b> (§3.4), ordenadas por {@code luz}. */
+    @Query(value = "SELECT luz FROM produto_necessidade_luz WHERE produto_id = :produtoId "
+            + "ORDER BY luz", nativeQuery = true)
+    List<String> findLuzesByProdutoId(@Param("produtoId") Long produtoId);
+
+    /** Apaga todas as necessidades de luz do produto (1o passo do replace-set — §3.5/R9). */
+    @Modifying
+    @Query(value = "DELETE FROM produto_necessidade_luz WHERE produto_id = :produtoId",
+            nativeQuery = true)
+    void removerLuzesDoProduto(@Param("produtoId") Long produtoId);
+
+    /** Insere uma necessidade de luz (2o passo do replace-set); {@code ON CONFLICT} = idempotente. */
+    @Modifying
+    @Query(value = "INSERT INTO produto_necessidade_luz (produto_id, luz) VALUES (:produtoId, :luz) "
+            + "ON CONFLICT DO NOTHING", nativeQuery = true)
+    void inserirLuz(@Param("produtoId") Long produtoId, @Param("luz") String luz);
 
     // ----- Relacionamentos derivados do produto (M5-revisao/AD-SQ-66, §R3.5): leitura read-only por
     // ----- NOME, colunas enumeradas (sem bytea/AD-SQ-38), JOIN na tabela VIVA (nome atual; cadastro

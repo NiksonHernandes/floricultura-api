@@ -10,7 +10,8 @@ import java.util.List;
  *
  * <p><b>Por que existe uma validacao de servico se o banco ja tem o CHECK</b> (armadilha §12 #15a): o
  * {@code ck_produto_altura_exige_porte} e defesa em profundidade e, quando atingido, chega ao Spring
- * como {@code DataIntegrityViolationException} → <b>500</b>. O contrato manda <b>400
+ * como {@code DataIntegrityViolationException} → <b>409</b> generico, com {@code details} vazio
+ * (AD-SQ-119 — medido por mutacao; o "500" antes citado nao acontece). O contrato manda <b>400
  * VALIDATION_ERROR</b> com {@code field:"alturaCm"}, entao o {@code ProdutoService} avalia a regra
  * sobre o <b>estado RESULTANTE</b> do POST/PUT e <b>antes</b> de qualquer escrita (nada persiste).
  * Traduzida por handler local do {@code ProdutoController}, no mesmo padrao de
