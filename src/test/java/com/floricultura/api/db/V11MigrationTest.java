@@ -80,15 +80,10 @@ class V11MigrationTest {
         assertThat(row.get("success")).isEqualTo(Boolean.TRUE);
     }
 
-    /** Head atual do schema = V11 (maior versao aplicada por installed_rank). */
-    @Test
-    void headDoSchemaEV11() {
-        String head = jdbc.queryForObject(
-                "SELECT version FROM flyway_schema_history "
-                        + "WHERE success = true AND version IS NOT NULL "
-                        + "ORDER BY installed_rank DESC LIMIT 1", String.class);
-        assertThat(head).isEqualTo("11");
-    }
+    // O head-pin (`headDoSchemaEV11`) foi REMOVIDO em 2026-09-11, com autorizacao do dono (AD-SQ-88), porque a
+    // V12 do M6 o quebraria por desenho. Ele aferia "nada veio depois da V11" — afirmacao com prazo de validade,
+    // nao invariante. O que tem valor real e o metodo acima, que afere o EFEITO da V11. Terceiro episodio do
+    // mesmo padrao (pin da V8 removido no M5, da V10 no M5.2): NAO recriar apontando para a V12.
 
     // ----- CA-C1: tabela + colunas com os tipos certos -----
 
