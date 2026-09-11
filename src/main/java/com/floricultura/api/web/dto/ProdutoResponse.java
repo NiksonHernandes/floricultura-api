@@ -36,6 +36,10 @@ import java.util.List;
  *                      colecao nem bytea); <b>sempre presente</b> (lista e detalhe)
  * @param eventoIds     ids dos eventos vinculados — presente <b>so no detalhe</b> {@code GET /{id}};
  *                      na lista vem {@code null} (documentado, evita N+1 — §3.4/AD-SQ-44)
+ * @param caracteristica porte da planta ({@code MUDA|JOVEM|ADULTA}) ou {@code null} — SPEC-M6 §3.4
+ * @param alturaCm      altura em centimetros inteiros (1..10000) ou {@code null} (R12/R16: a exibicao
+ *                      em metros e derivada no front, sem estado guardado)
+ * @param toxicidade    {@code TOXICA|NAO_TOXICA} ou {@code null} = nao informado (tri-estado — R8/P2)
  */
 public record ProdutoResponse(
         Long id,
@@ -52,7 +56,10 @@ public record ProdutoResponse(
         Instant atualizadoEm,
         boolean temImagem,
         boolean sazonal,
-        List<Long> eventoIds) {
+        List<Long> eventoIds,
+        String caracteristica,
+        Integer alturaCm,
+        String toxicidade) {
 
     /**
      * Mapeia a entidade para o response (lista / retorno de escrita sem detalhe), com {@code
@@ -77,6 +84,17 @@ public record ProdutoResponse(
         return montar(produto, sazonal, eventoIds);
     }
 
+    /**
+     * Variante de <b>vitrine</b> ({@code GET /eventos/{id}/produtos} — SPEC-M4.1 §3.1/PA#2): identica a
+     * {@link #de} porem com {@code sazonal} <b>fixo em {@code true}</b> (todo item do JOIN e, por
+     * definicao, vinculado; o {@code @Formula} nao e confiavel sob query nativa). Existe para que o
+     * {@code EventoService} <b>nao</b> reconstrua o record posicionalmente: com 5 componentes novos no
+     * M6, aquela chamada de 15 args quebrava a cada ampliacao do contrato (§12 #4/achado A5).
+     */
+    public static ProdutoResponse deVitrine(Produto produto) {
+        return montar(produto, true, null);
+    }
+
     private static ProdutoResponse montar(Produto produto, boolean sazonal, List<Long> eventoIds) {
         boolean estoqueBaixo =
                 produto.getEstoqueAtual().compareTo(produto.getEstoqueMinimo()) <= 0;
@@ -96,6 +114,9 @@ public record ProdutoResponse(
                 produto.getAtualizadoEm(),
                 temImagem,
                 sazonal,
-                eventoIds);
+                eventoIds,
+                produto.getCaracteristica(),
+                produto.getAlturaCm(),
+                produto.getToxicidade());
     }
 }

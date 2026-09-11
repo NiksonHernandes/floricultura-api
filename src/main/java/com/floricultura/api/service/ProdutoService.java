@@ -113,6 +113,8 @@ public class ProdutoService {
     public ProdutoResponse criar(CriarProdutoRequest req) {
         // Valida eventoIds ANTES de qualquer escrita (CA-11: id inexistente → 400, nada persiste).
         List<Long> eventoIds = normalizarEValidarEventos(req.eventoIds());
+        // M6/R13: regra cruzada da altura ANTES do banco (CA-10) — senao o CHECK viraria 500 (§12 #15).
+        validarAltura(req.caracteristica(), req.alturaCm());
         Produto produto = ProdutoFactory.novo(
                 req.nome(),
                 req.descricao(),
@@ -120,6 +122,7 @@ public class ProdutoService {
                 req.estoqueMinimo(),
                 req.preco(),
                 req.imagemUrl());
+        aplicarAtributosBotanicos(produto, req.caracteristica(), req.alturaCm(), req.toxicidade());
         Long id = produtoRepository.save(produto).getId();
         if (eventoIds != null) {
             vinculoService.substituir(id, eventoIds); // replace-set atomico (transacao propria)
@@ -138,6 +141,10 @@ public class ProdutoService {
     @Transactional
     public ProdutoResponse atualizar(Long id, AtualizarProdutoRequest req) {
         List<Long> eventoIds = normalizarEValidarEventos(req.eventoIds());
+        // Escalares sao substituidos por inteiro no PUT, entao o par do payload JA E o estado
+        // resultante do update — inclusive no caso "so troquei a caracteristica para MUDA" numa linha
+        // que tinha altura: se o payload nao limpar alturaCm, isto e 400 (CA-10), nunca 500.
+        validarAltura(req.caracteristica(), req.alturaCm());
         Produto produto = produtoRepository.findById(id)
                 .orElseThrow(ProdutoNaoEncontradoException::new);
         produto.setNome(req.nome());
@@ -146,6 +153,7 @@ public class ProdutoService {
         produto.setEstoqueMinimo(req.estoqueMinimo());
         produto.setPreco(req.preco());
         produto.setImagemUrl(req.imagemUrl());
+        aplicarAtributosBotanicos(produto, req.caracteristica(), req.alturaCm(), req.toxicidade());
         produto.setAtualizadoEm(Instant.now()); // §4: PUT avanca atualizado_em; estoqueAtual intacto
         produtoRepository.save(produto);
         if (eventoIds != null) {
@@ -169,6 +177,39 @@ public class ProdutoService {
             throw new ProdutoNaoEncontradoException();
         }
         produtoRepository.deleteById(id);
+    }
+
+    /**
+     * Regra cruzada da altura (SPEC-M6 §4.3/R13, CA-10), avaliada sobre o <b>estado resultante</b> da
+     * operacao e <b>antes</b> de qualquer escrita: {@code alturaCm} so e aceita com
+     * {@code caracteristica ∈ {JOVEM, ADULTA}}.
+     *
+     * <p>Cobre os <b>dois</b> casos do contrato: {@code MUDA + altura} e {@code caracteristica = null +
+     * altura} (o buraco da logica ternaria que a AD-SQ-89 fechou no CHECK). Sem altura, qualquer
+     * caracteristica passa — inclusive {@code null} (P12: produto pre-M6 e valido). O {@code
+     * ck_produto_altura_exige_porte} continua como segunda linha de defesa, mas nao deve ser atingido:
+     * se fosse, viraria 500 em vez do 400 do contrato (§12 #15a).
+     */
+    private static void validarAltura(String caracteristica, Integer alturaCm) {
+        if (alturaCm == null) {
+            return; // sem altura declarada, nao ha regra cruzada a violar
+        }
+        if (!"JOVEM".equals(caracteristica) && !"ADULTA".equals(caracteristica)) {
+            throw new AlturaSemPorteException();
+        }
+    }
+
+    /**
+     * Aplica os 3 atributos botanicos <b>escalares</b> (§3.3): valor grava, {@code null} limpa — mesma
+     * semantica de {@code descricao}/{@code preco} do M2 (e <b>nao</b> a de {@code eventoIds}, que e
+     * replace-set). Em particular, {@code toxicidade = null} e o terceiro estado "nao informado"
+     * (R8/P2), nao um erro. Chamado depois de {@link #validarAltura}.
+     */
+    private static void aplicarAtributosBotanicos(
+            Produto produto, String caracteristica, Integer alturaCm, String toxicidade) {
+        produto.setCaracteristica(caracteristica);
+        produto.setAlturaCm(alturaCm);
+        produto.setToxicidade(toxicidade);
     }
 
     /**

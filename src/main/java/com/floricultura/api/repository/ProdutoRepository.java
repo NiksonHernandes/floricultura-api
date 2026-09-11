@@ -159,10 +159,17 @@ public interface ProdutoRepository extends JpaRepository<Produto, Long> {
      * como todo item do JOIN e, por definicao, vinculado, projeta-se a constante {@code TRUE AS sazonal}
      * (nao se replica o subselect do {@code @Formula} — §12/PA#2) e o servico ainda fixa {@code true} no
      * mapeamento. Aliases casam os {@code @Column} da @Entity (hidratacao por nome).
+     *
+     * <p><b>⚠️ Esta projecao acompanha a @Entity (SPEC-M6 §3.5/§12 #3).</b> Toda coluna mapeada em
+     * {@link Produto} precisa existir no {@code ResultSet} — por isso o M6 acrescentou
+     * {@code p.caracteristica}, {@code p.altura_cm} e {@code p.toxicidade}. Esquecer quebra a vitrine
+     * com erro obscuro de coluna ausente; e trocar tudo por {@code p.*} "resolveria" arrastando o
+     * {@code bytea} de volta — proibido (AD-SQ-38/AD-SQ-50). Coluna nova na @Entity ⇒ coluna nova aqui.
      */
     @Query(value = "SELECT p.id, p.nome, p.descricao, p.unidade_medida, p.estoque_minimo, "
             + "p.estoque_atual, p.preco, p.imagem_url, p.imagem_content_type, p.imagem_filename, "
-            + "p.ativo, p.criado_em, p.atualizado_em, TRUE AS sazonal "
+            + "p.ativo, p.criado_em, p.atualizado_em, "
+            + "p.caracteristica, p.altura_cm, p.toxicidade, TRUE AS sazonal "
             + "FROM produto p JOIN evento_produto ep ON ep.produto_id = p.id "
             + "WHERE ep.evento_id = :eventoId",
             countQuery = "SELECT count(*) FROM produto p JOIN evento_produto ep "

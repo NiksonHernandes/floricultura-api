@@ -72,6 +72,28 @@ public class Produto {
     @Column(name = "ativo", nullable = false)
     private boolean ativo;
 
+    // ---- Atributos botanicos ESCALARES (M6/V12, SPEC-M6 §3.5) --------------------------------
+    // Mirror fiel da V12 (mesma convencao de `unidade_medida`/AD-SQ-31): o enum e String ASCII e o
+    // CHECK vive no banco + Bean Validation no DTO. Todos ANULAVEIS (P12) — produto pre-M6 continua
+    // valido com os 3 nulos, sem backfill. Rotulo pt-BR e responsabilidade do front.
+
+    /** {@code MUDA|JOVEM|ADULTA} ou {@code null} (nao informado) — {@code ck_produto_caracteristica}. */
+    @Column(name = "caracteristica", length = 10)
+    private String caracteristica;
+
+    /**
+     * Altura da planta <b>sempre em centimetros inteiros</b>, 1..10000 (R12/P1 — nao existe coluna
+     * {@code altura_unidade}; a conversao m↔cm e do front). So pode existir com {@code caracteristica
+     * ∈ {JOVEM, ADULTA}} (R13): o {@code ck_produto_altura_exige_porte} NULL-safe e a segunda linha de
+     * defesa — o {@code ProdutoService} valida <b>antes</b> do banco para devolver 400 e nao 500 (§12 #15).
+     */
+    @Column(name = "altura_cm")
+    private Integer alturaCm;
+
+    /** {@code TOXICA|NAO_TOXICA} ou {@code null} = <b>nao informado</b> (tri-estado por ausencia — R8/P2). */
+    @Column(name = "toxicidade", length = 12)
+    private String toxicidade;
+
     /**
      * {@code sazonal} = existe ao menos um vinculo N:N em {@code evento_produto} (M4/AD-SQ-44). Mapeado
      * como {@link Formula} (subselect SQL <b>read-only</b>, NAO coluna) — o {@code ddl-auto=validate}
@@ -178,6 +200,30 @@ public class Produto {
 
     public void setAtivo(boolean ativo) {
         this.ativo = ativo;
+    }
+
+    public String getCaracteristica() {
+        return caracteristica;
+    }
+
+    public void setCaracteristica(String caracteristica) {
+        this.caracteristica = caracteristica;
+    }
+
+    public Integer getAlturaCm() {
+        return alturaCm;
+    }
+
+    public void setAlturaCm(Integer alturaCm) {
+        this.alturaCm = alturaCm;
+    }
+
+    public String getToxicidade() {
+        return toxicidade;
+    }
+
+    public void setToxicidade(String toxicidade) {
+        this.toxicidade = toxicidade;
     }
 
     /** {@code true} se o produto tem ao menos um vinculo em {@code evento_produto} (@Formula, M4). */

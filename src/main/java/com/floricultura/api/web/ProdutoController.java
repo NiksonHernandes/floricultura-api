@@ -1,6 +1,7 @@
 package com.floricultura.api.web;
 
 import com.floricultura.api.config.OpenApiConfig;
+import com.floricultura.api.service.AlturaSemPorteException;
 import com.floricultura.api.service.EventoInexistenteException;
 import com.floricultura.api.service.ProdutoNaoEncontradoException;
 import com.floricultura.api.service.ProdutoService;
@@ -114,7 +115,9 @@ public class ProdutoController {
      * (AD-SQ-30). Payload invalido (enum fora do conjunto, {@code nome} vazio, {@code estoqueMinimo}/
      * {@code preco} negativo) → 400 VALIDATION_ERROR com {@code details}. USER → 403 (SecurityConfig).
      */
-    @Operation(summary = "Cria produto (ADMIN) → 201 com estoqueAtual=0")
+    @Operation(summary = "Cria produto (ADMIN) → 201 com estoqueAtual=0; aceita os atributos botanicos "
+            + "opcionais caracteristica (MUDA|JOVEM|ADULTA), alturaCm (1..10000 cm inteiros, exige "
+            + "porte JOVEM/ADULTA) e toxicidade (TOXICA|NAO_TOXICA; ausente = nao informado)")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ProdutoResponse> criar(
@@ -127,7 +130,8 @@ public class ProdutoController {
      * <b>inalterado</b> (AD-SQ-30). Payload invalido → 400; inexistente → 404 (handler local); USER →
      * 403 (SecurityConfig).
      */
-    @Operation(summary = "Atualiza produto (ADMIN) → 200; nunca toca estoqueAtual (404 se inexistente)")
+    @Operation(summary = "Atualiza produto (ADMIN) → 200; nunca toca estoqueAtual (404 se inexistente). "
+            + "Os atributos botanicos escalares sao substituidos por inteiro: valor grava, null limpa")
     @PutMapping("/{id}")
     public ApiResponse<ProdutoResponse> atualizar(
             @PathVariable Long id,
@@ -166,6 +170,20 @@ public class ProdutoController {
             ProdutoNaoEncontradoException ex, HttpServletRequest http) {
         ApiError error = new ApiError(ErrorCode.NOT_FOUND.name(), ex.getMessage(), List.of());
         return ResponseEntity.status(ErrorCode.NOT_FOUND.status())
+                .body(ApiResponse.fail(error, http.getRequestURI()));
+    }
+
+    /**
+     * 400 VALIDATION_ERROR com {@code field:"alturaCm"}: altura informada sem porte {@code JOVEM/ADULTA}
+     * no POST/PUT (M6/R13, CA-10). Sem este handler a violacao cairia no CHECK do banco e viraria
+     * <b>500</b> (§12 #15a).
+     */
+    @ExceptionHandler(AlturaSemPorteException.class)
+    public ResponseEntity<ApiResponse<Object>> handleAlturaSemPorte(
+            AlturaSemPorteException ex, HttpServletRequest http) {
+        ApiError error = new ApiError(
+                ErrorCode.VALIDATION_ERROR.name(), ex.getMessage(), ex.getDetails());
+        return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.status())
                 .body(ApiResponse.fail(error, http.getRequestURI()));
     }
 
