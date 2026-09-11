@@ -3,6 +3,7 @@ package com.floricultura.api.web;
 import com.floricultura.api.config.OpenApiConfig;
 import com.floricultura.api.service.FornecedorNaoEncontradoException;
 import com.floricultura.api.service.FornecedorService;
+import com.floricultura.api.web.dto.ContatoFiltro;
 import com.floricultura.api.web.dto.FornecedorRequest;
 import com.floricultura.api.web.dto.FornecedorResponse;
 import com.floricultura.api.web.dto.PaginaResponse;
@@ -11,6 +12,7 @@ import com.floricultura.api.web.error.ErrorCode;
 import com.floricultura.api.web.response.ApiError;
 import com.floricultura.api.web.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -41,8 +43,9 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <ul>
  *   <li>{@code GET /api/v1/fornecedores} — 200 {@link PaginaResponse} (params {@code pagina}/{@code
- *       tamanho}/{@code nome}), ordem {@code nome ASC}, itens com {@code produtoIds=null}; range
- *       invalido → 400.</li>
+ *       tamanho}/{@code nome} e, do M6, {@code comTelefone}/{@code comEmail}/{@code ordenarPor}/
+ *       {@code direcao}), ordem default {@code nome ASC}, itens com {@code produtoIds=null}; range ou
+ *       ordenacao invalidos → 400.</li>
  *   <li>{@code GET /api/v1/fornecedores/{id}} — 200 detalhe; 404 se inexistente.</li>
  *   <li>{@code POST /api/v1/fornecedores} — 201 {@link FornecedorResponse} (ADMIN); 400 validacao; 403
  *       USER; 401 s/ token.</li>
@@ -67,19 +70,38 @@ public class FornecedorController {
     }
 
     /**
-     * CA-1: lista fornecedores paginados (default {@code pagina=0}, {@code tamanho=20}), ordenados por
-     * {@code nome ASC}, com filtro opcional {@code nome} ({@code ILIKE '%nome%'}). {@code tamanho} fora
-     * de {@code 1..100} ou {@code pagina < 0} → 400 VALIDATION_ERROR. Itens com {@code produtoIds=null}
-     * (CA-3).
+     * CA-1: lista fornecedores paginados (default {@code pagina=0}, {@code tamanho=20}), com filtro
+     * opcional {@code nome} ({@code ILIKE '%nome%'}). {@code tamanho} fora de {@code 1..100} ou
+     * {@code pagina < 0} → 400 VALIDATION_ERROR. Itens com {@code produtoIds=null} (CA-3).
+     *
+     * <p><b>M6 (SPEC-M6 §3.7, CA-24/CA-25):</b> tri-estados {@code comTelefone}/{@code comEmail}
+     * (ausente = sem filtro · {@code true} = tem · {@code false} = nao tem — nulo ou vazio) e ordenacao
+     * {@code ordenarPor} ({@code nome}|{@code telefone}|{@code email}, default {@code nome}) /
+     * {@code direcao} ({@code asc}|{@code desc}, default {@code asc}); fora do conjunto → 400 com o
+     * {@code field} correspondente. Contrato <b>identico</b> ao de {@code /clientes} (D3).
      */
-    @Operation(summary = "Lista fornecedores paginados (pagina/tamanho/nome), ordem nome ASC")
+    @Operation(summary = "Lista fornecedores paginados com filtros (nome, comTelefone, comEmail) e "
+            + "ordenacao (ordenarPor=nome|telefone|email, direcao=asc|desc; sem telefone/e-mail "
+            + "vai para o fim)")
     @GetMapping
     public ApiResponse<PaginaResponse<FornecedorResponse>> listar(
             @RequestParam(required = false) Integer pagina,
             @RequestParam(required = false) Integer tamanho,
             @RequestParam(required = false) String nome,
+            @Parameter(description = "Tri-estado: ausente = sem filtro; true = tem telefone; "
+                    + "false = sem telefone (nulo ou vazio)")
+            @RequestParam(required = false) Boolean comTelefone,
+            @Parameter(description = "Tri-estado: ausente = sem filtro; true = tem e-mail; "
+                    + "false = sem e-mail (nulo ou vazio)")
+            @RequestParam(required = false) Boolean comEmail,
+            @Parameter(description = "nome | telefone | email (default nome)")
+            @RequestParam(required = false) String ordenarPor,
+            @Parameter(description = "asc | desc (default asc)")
+            @RequestParam(required = false) String direcao,
             HttpServletRequest http) {
-        return ApiResponse.ok(fornecedorService.listar(pagina, tamanho, nome), http.getRequestURI());
+        ContatoFiltro filtro = ContatoFiltro.de(nome, comTelefone, comEmail, ordenarPor, direcao);
+        return ApiResponse.ok(
+                fornecedorService.listar(pagina, tamanho, filtro), http.getRequestURI());
     }
 
     /** CA-2: detalha fornecedor por id; inexistente → 404. */
