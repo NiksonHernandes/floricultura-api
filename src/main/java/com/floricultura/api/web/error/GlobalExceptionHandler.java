@@ -14,6 +14,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -78,6 +79,22 @@ public class GlobalExceptionHandler {
             DataIntegrityViolationException ex, HttpServletRequest request) {
         log.warn("Conflito de integridade em {}: {}", request.getRequestURI(), ex.getMessage());
         return build(ErrorCode.CONFLICT, ErrorCode.CONFLICT.defaultMessage(), List.of(), request);
+    }
+
+    /**
+     * Path/query com tipo incompativel (ex.: {@code /produtos/abc}, {@code ?precoMin=abc}) -> 400,
+     * nunca 500 (M6.1/D3). Sem este handler o erro de CONVERSAO do Spring cai no catch-all abaixo e
+     * vira {@code INTERNAL_ERROR}, culpando o servidor por um erro do cliente. O corpo leva apenas o
+     * NOME do parametro — a mensagem do Spring ("Failed to convert value of type 'java.lang.String'
+     * to required type 'java.lang.Long'") vazaria detalhe tecnico (SPEC-M0 §9) e o valor recebido
+     * nao e ecoado. Log em {@code debug}: e erro do cliente, nao incidente de servidor.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Object>> handleTipoInvalido(
+            MethodArgumentTypeMismatchException ex, HttpServletRequest request) {
+        log.debug("Parametro de tipo invalido em {}: {}", request.getRequestURI(), ex.getName());
+        return build(ErrorCode.VALIDATION_ERROR, ErrorCode.VALIDATION_ERROR.defaultMessage(),
+                List.of(new FieldErrorItem(ex.getName(), "Valor invalido.")), request);
     }
 
     /** Qualquer excecao nao mapeada -> 500 generico; detalhe apenas no log. */
