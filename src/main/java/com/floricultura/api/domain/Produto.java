@@ -1,14 +1,19 @@
 package com.floricultura.api.domain;
 
+import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Set;
 import org.hibernate.annotations.Formula;
+import org.hibernate.annotations.Immutable;
 
 /**
  * Espelho fiel (SPEC-M2 §8) da tabela {@code produto} — schema V1 (SPEC-M0 §3.6) + coluna
@@ -71,6 +76,59 @@ public class Produto {
 
     @Column(name = "ativo", nullable = false)
     private boolean ativo;
+
+    // ---- Atributos botanicos ESCALARES (M6/V12, SPEC-M6 §3.5) --------------------------------
+    // Mirror fiel da V12 (mesma convencao de `unidade_medida`/AD-SQ-31): o enum e String ASCII e o
+    // CHECK vive no banco + Bean Validation no DTO. Todos ANULAVEIS (P12) — produto pre-M6 continua
+    // valido com os 3 nulos, sem backfill. Rotulo pt-BR e responsabilidade do front.
+
+    /** {@code MUDA|JOVEM|ADULTA} ou {@code null} (nao informado) — {@code ck_produto_caracteristica}. */
+    @Column(name = "caracteristica", length = 10)
+    private String caracteristica;
+
+    /**
+     * Altura da planta <b>sempre em centimetros inteiros</b>, 1..10000 (R12/P1 — nao existe coluna
+     * {@code altura_unidade}; a conversao m↔cm e do front). So pode existir com {@code caracteristica
+     * ∈ {JOVEM, ADULTA}} (R13): o {@code ck_produto_altura_exige_porte} NULL-safe e a segunda linha de
+     * defesa — o {@code ProdutoService} valida <b>antes</b> do banco para devolver 400 e nao 500 (§12 #15).
+     */
+    @Column(name = "altura_cm")
+    private Integer alturaCm;
+
+    /** {@code TOXICA|NAO_TOXICA} ou {@code null} = <b>nao informado</b> (tri-estado por ausencia — R8/P2). */
+    @Column(name = "toxicidade", length = 12)
+    private String toxicidade;
+
+    // ---- Vinculos MULTIVALORADOS: mapeamento READ-ONLY, so para o EXISTS do filtro (M6/§3.6) ----
+    // Colecoes de VALOR (@ElementCollection), NAO @Entity de juncao — o §3.5 continua valendo ao pe da
+    // letra: detalhe e replace-set seguem 100% por query nativa dedicada no ProdutoRepository, e nada
+    // aqui tem getter/setter. Existem por uma razao unica: o EXISTS correlacionado que o §3.6 exige e
+    // impossivel na Criteria API sobre tabela nao mapeada, e o JOIN esta proibido (duplicaria a linha
+    // de um produto com 2 cores selecionadas e corromperia `totalElementos` — §12 #5).
+    //   · LAZY (default do @ElementCollection): lista e detalhe NUNCA as materializam — o invariante
+    //     de performance (AD-SQ-38/FC-09) e a hidratacao da query nativa da vitrine ficam intactos.
+    //   · @Immutable: o Hibernate nao gera INSERT/UPDATE a partir delas; quem escreve continua sendo
+    //     o delete+insert nativo do servico, sem risco de o flush atropelar o replace-set (R9).
+    // O unico consumidor legitimo e a ProdutoSpecs, que as referencia pelo NOME do atributo.
+
+    @ElementCollection
+    @Immutable
+    @CollectionTable(name = "produto_cor", joinColumns = @JoinColumn(name = "produto_id"))
+    @Column(name = "cor_id", nullable = false)
+    private Set<Long> corIds;
+
+    @ElementCollection
+    @Immutable
+    @CollectionTable(
+            name = "produto_necessidade_luz", joinColumns = @JoinColumn(name = "produto_id"))
+    @Column(name = "luz", nullable = false, length = 12)
+    private Set<String> necessidadeLuz;
+
+    @ElementCollection
+    @Immutable
+    @CollectionTable(name = "evento_produto", joinColumns = @JoinColumn(name = "produto_id"))
+    @Column(name = "evento_id", nullable = false)
+    private Set<Long> eventoIds;
 
     /**
      * {@code sazonal} = existe ao menos um vinculo N:N em {@code evento_produto} (M4/AD-SQ-44). Mapeado
@@ -178,6 +236,30 @@ public class Produto {
 
     public void setAtivo(boolean ativo) {
         this.ativo = ativo;
+    }
+
+    public String getCaracteristica() {
+        return caracteristica;
+    }
+
+    public void setCaracteristica(String caracteristica) {
+        this.caracteristica = caracteristica;
+    }
+
+    public Integer getAlturaCm() {
+        return alturaCm;
+    }
+
+    public void setAlturaCm(Integer alturaCm) {
+        this.alturaCm = alturaCm;
+    }
+
+    public String getToxicidade() {
+        return toxicidade;
+    }
+
+    public void setToxicidade(String toxicidade) {
+        this.toxicidade = toxicidade;
     }
 
     /** {@code true} se o produto tem ao menos um vinculo em {@code evento_produto} (@Formula, M4). */

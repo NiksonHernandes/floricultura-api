@@ -2,11 +2,13 @@ package com.floricultura.api.repository;
 
 import com.floricultura.api.domain.Produto;
 import jakarta.persistence.LockModeType;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -14,15 +16,16 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 /**
- * Acesso a persistencia de {@link Produto} (SPEC-M2 §8). O {@code findAll(Pageable)} herdado cobre a
- * listagem paginada/ordenada (AD-SQ-29); {@code findByNomeContainingIgnoreCase} implementa o filtro
- * {@code ILIKE '%nome%'} (case-insensitive, substring) do contrato de listagem (§3.3) consumido na
- * onda 2 (T-M2-2).
+ * Acesso a persistencia de {@link Produto} (SPEC-M2 §8). Desde o M6 (SPEC-M6 §3.6) a listagem
+ * paginada/filtrada/ordenada roda por {@code findAll(Specification, Pageable)} do
+ * {@link JpaSpecificationExecutor} — quem monta o predicado e o {@code ORDER BY} e a
+ * {@code ProdutoSpecs}. A derived query {@code findByNomeContainingIgnoreCase} foi <b>removida</b>
+ * junto com seu ultimo chamador: o filtro por nome vive agora no {@code FiltroTexto} (que escapa
+ * {@code %}/{@code _}, preservando a semantica que o Spring Data dava de graca).
  */
 @Repository
-public interface ProdutoRepository extends JpaRepository<Produto, Long> {
-
-    Page<Produto> findByNomeContainingIgnoreCase(String nome, Pageable pageable);
+public interface ProdutoRepository
+        extends JpaRepository<Produto, Long>, JpaSpecificationExecutor<Produto> {
 
     /**
      * Carrega o produto com <b>lock pessimista de escrita</b> ({@code SELECT ... FOR UPDATE}) para a
@@ -159,10 +162,17 @@ public interface ProdutoRepository extends JpaRepository<Produto, Long> {
      * como todo item do JOIN e, por definicao, vinculado, projeta-se a constante {@code TRUE AS sazonal}
      * (nao se replica o subselect do {@code @Formula} — §12/PA#2) e o servico ainda fixa {@code true} no
      * mapeamento. Aliases casam os {@code @Column} da @Entity (hidratacao por nome).
+     *
+     * <p><b>⚠️ Esta projecao acompanha a @Entity (SPEC-M6 §3.5/§12 #3).</b> Toda coluna mapeada em
+     * {@link Produto} precisa existir no {@code ResultSet} — por isso o M6 acrescentou
+     * {@code p.caracteristica}, {@code p.altura_cm} e {@code p.toxicidade}. Esquecer quebra a vitrine
+     * com erro obscuro de coluna ausente; e trocar tudo por {@code p.*} "resolveria" arrastando o
+     * {@code bytea} de volta — proibido (AD-SQ-38/AD-SQ-50). Coluna nova na @Entity ⇒ coluna nova aqui.
      */
     @Query(value = "SELECT p.id, p.nome, p.descricao, p.unidade_medida, p.estoque_minimo, "
             + "p.estoque_atual, p.preco, p.imagem_url, p.imagem_content_type, p.imagem_filename, "
-            + "p.ativo, p.criado_em, p.atualizado_em, TRUE AS sazonal "
+            + "p.ativo, p.criado_em, p.atualizado_em, "
+            + "p.caracteristica, p.altura_cm, p.toxicidade, TRUE AS sazonal "
             + "FROM produto p JOIN evento_produto ep ON ep.produto_id = p.id "
             + "WHERE ep.evento_id = :eventoId",
             countQuery = "SELECT count(*) FROM produto p JOIN evento_produto ep "
@@ -183,6 +193,57 @@ public interface ProdutoRepository extends JpaRepository<Produto, Long> {
     @Query(value = "INSERT INTO evento_produto (produto_id, evento_id) VALUES (:produtoId, :eventoId) "
             + "ON CONFLICT DO NOTHING", nativeQuery = true)
     void inserirVinculo(@Param("produtoId") Long produtoId, @Param("eventoId") Long eventoId);
+
+    // ----- Atributos MULTIVALORADOS (M6/§3.5): `produto_cor` e `produto_necessidade_luz` SEM @Entity,
+    // ----- so por query nativa dedicada (padrao de evento_produto/AD-SQ-44 e da variante/AD-SQ-76).
+    // ----- Mapea-las poria colecao na @Entity e quebraria a hidratacao de `buscarPorEvento` (§12 #3).
+
+    /**
+     * Cores do produto para o <b>detalhe</b> (§3.4), com {@code hex}, ordenadas por {@code c.nome ASC}.
+     * Aliases casam {@link CorReferenciaProjection}. Na lista nunca e chamada (CA-13/AD-SQ-38).
+     */
+    @Query(value = "SELECT c.id AS id, c.nome AS nome, c.hex AS hex FROM produto_cor pc "
+            + "JOIN cor c ON c.id = pc.cor_id WHERE pc.produto_id = :produtoId ORDER BY c.nome",
+            nativeQuery = true)
+    List<CorReferenciaProjection> findCoresByProdutoId(@Param("produtoId") Long produtoId);
+
+    /**
+     * Ids de {@code corIds} que <b>existem</b> no catalogo — <b>uma unica query</b> para validar o
+     * payload antes de qualquer escrita (§3.5/R10/CA-11); nunca {@code findById} em laco. Cumpre o papel
+     * do {@code contarCoresInexistentes} do §3.5 devolvendo os <b>ids</b> e nao um {@code long}: o §3.3
+     * exige o id na mensagem, que a contagem nao revela. Nao invocar com lista vazia (o {@code IN ()}
+     * e erro de sintaxe no Postgres).
+     */
+    @Query(value = "SELECT id FROM cor WHERE id IN (:corIds)", nativeQuery = true)
+    List<Long> findCorIdsExistentes(@Param("corIds") Collection<Long> corIds);
+
+    /** Apaga todos os vinculos de cor do produto (1o passo do replace-set — §3.5/R9). */
+    @Modifying
+    @Query(value = "DELETE FROM produto_cor WHERE produto_id = :produtoId", nativeQuery = true)
+    void removerCoresDoProduto(@Param("produtoId") Long produtoId);
+
+    /** Insere um vinculo produto&lt;-&gt;cor (2o passo do replace-set); {@code ON CONFLICT} = idempotente. */
+    @Modifying
+    @Query(value = "INSERT INTO produto_cor (produto_id, cor_id) VALUES (:produtoId, :corId) "
+            + "ON CONFLICT DO NOTHING", nativeQuery = true)
+    void inserirCor(@Param("produtoId") Long produtoId, @Param("corId") Long corId);
+
+    /** Necessidades de luz do produto para o <b>detalhe</b> (§3.4), ordenadas por {@code luz}. */
+    @Query(value = "SELECT luz FROM produto_necessidade_luz WHERE produto_id = :produtoId "
+            + "ORDER BY luz", nativeQuery = true)
+    List<String> findLuzesByProdutoId(@Param("produtoId") Long produtoId);
+
+    /** Apaga todas as necessidades de luz do produto (1o passo do replace-set — §3.5/R9). */
+    @Modifying
+    @Query(value = "DELETE FROM produto_necessidade_luz WHERE produto_id = :produtoId",
+            nativeQuery = true)
+    void removerLuzesDoProduto(@Param("produtoId") Long produtoId);
+
+    /** Insere uma necessidade de luz (2o passo do replace-set); {@code ON CONFLICT} = idempotente. */
+    @Modifying
+    @Query(value = "INSERT INTO produto_necessidade_luz (produto_id, luz) VALUES (:produtoId, :luz) "
+            + "ON CONFLICT DO NOTHING", nativeQuery = true)
+    void inserirLuz(@Param("produtoId") Long produtoId, @Param("luz") String luz);
 
     // ----- Relacionamentos derivados do produto (M5-revisao/AD-SQ-66, §R3.5): leitura read-only por
     // ----- NOME, colunas enumeradas (sem bytea/AD-SQ-38), JOIN na tabela VIVA (nome atual; cadastro

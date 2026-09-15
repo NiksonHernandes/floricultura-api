@@ -36,6 +36,15 @@ import java.util.List;
  *                      colecao nem bytea); <b>sempre presente</b> (lista e detalhe)
  * @param eventoIds     ids dos eventos vinculados — presente <b>so no detalhe</b> {@code GET /{id}};
  *                      na lista vem {@code null} (documentado, evita N+1 — §3.4/AD-SQ-44)
+ * @param caracteristica porte da planta ({@code MUDA|JOVEM|ADULTA}) ou {@code null} — SPEC-M6 §3.4
+ * @param alturaCm      altura em centimetros inteiros (1..10000) ou {@code null} (R12/R16: a exibicao
+ *                      em metros e derivada no front, sem estado guardado)
+ * @param toxicidade    {@code TOXICA|NAO_TOXICA} ou {@code null} = nao informado (tri-estado — R8/P2)
+ * @param necessidadeLuz valores de {@code {SOL_PLENO,MEIA_SOMBRA,SOMBRA}} ordenados; como {@code
+ *                      eventoIds}, presente <b>so no detalhe</b> ({@code []} quando vazio) e {@code
+ *                      null} na lista (§3.4/CA-13/AD-SQ-38)
+ * @param cores         cores vinculadas ({@code id}/{@code nome}/{@code hex}) ordenadas por {@code nome
+ *                      ASC}; so no detalhe ({@code []} quando vazio), {@code null} na lista (CA-13)
  */
 public record ProdutoResponse(
         Long id,
@@ -52,7 +61,12 @@ public record ProdutoResponse(
         Instant atualizadoEm,
         boolean temImagem,
         boolean sazonal,
-        List<Long> eventoIds) {
+        List<Long> eventoIds,
+        String caracteristica,
+        Integer alturaCm,
+        String toxicidade,
+        List<String> necessidadeLuz,
+        List<CorReferencia> cores) {
 
     /**
      * Mapeia a entidade para o response (lista / retorno de escrita sem detalhe), com {@code
@@ -63,7 +77,8 @@ public record ProdutoResponse(
      */
     public static ProdutoResponse de(Produto produto) {
         // Lista: sazonal vem do @Formula da @Entity (recem-carregada pelo findAll — valor fresco).
-        return montar(produto, produto.isSazonal(), null);
+        // As 3 colecoes vao null de proposito: a lista nao materializa colecao (§3.4/CA-13).
+        return montar(produto, produto.isSazonal(), null, null, null);
     }
 
     /**
@@ -71,13 +86,30 @@ public record ProdutoResponse(
      * eventoIds} vinculados (§3.4/CA-9). {@code sazonal} e <b>derivado da colecao carregada</b>
      * ({@code !eventoIds.isEmpty()}) — identico ao {@code exists(...)} do @Formula, porem consistente
      * com {@code eventoIds} e imune a staleness do @Formula no caminho de escrita (mesma transacao).
+     *
+     * <p>M6: recebe tambem os multivalorados ({@code necessidadeLuz} e {@code cores}), que o servico le
+     * por query nativa dedicada — nenhuma colecao e mapeada na @Entity (§3.5).
      */
-    public static ProdutoResponse deDetalhe(Produto produto, List<Long> eventoIds) {
+    public static ProdutoResponse deDetalhe(Produto produto, List<Long> eventoIds,
+            List<String> necessidadeLuz, List<CorReferencia> cores) {
         boolean sazonal = eventoIds != null && !eventoIds.isEmpty();
-        return montar(produto, sazonal, eventoIds);
+        return montar(produto, sazonal, eventoIds, necessidadeLuz, cores);
     }
 
-    private static ProdutoResponse montar(Produto produto, boolean sazonal, List<Long> eventoIds) {
+    /**
+     * Variante de <b>vitrine</b> ({@code GET /eventos/{id}/produtos} — SPEC-M4.1 §3.1/PA#2): identica a
+     * {@link #de} porem com {@code sazonal} <b>fixo em {@code true}</b> (todo item do JOIN e, por
+     * definicao, vinculado; o {@code @Formula} nao e confiavel sob query nativa). Existe para que o
+     * {@code EventoService} <b>nao</b> reconstrua o record posicionalmente: com 5 componentes novos no
+     * M6, aquela chamada de 15 args quebrava a cada ampliacao do contrato (§12 #4/achado A5).
+     */
+    public static ProdutoResponse deVitrine(Produto produto) {
+        // Vitrine e LISTA: colecoes null, como em `de` (§3.4/AD-SQ-38/AD-SQ-44).
+        return montar(produto, true, null, null, null);
+    }
+
+    private static ProdutoResponse montar(Produto produto, boolean sazonal, List<Long> eventoIds,
+            List<String> necessidadeLuz, List<CorReferencia> cores) {
         boolean estoqueBaixo =
                 produto.getEstoqueAtual().compareTo(produto.getEstoqueMinimo()) <= 0;
         boolean temImagem = produto.getImagemContentType() != null;
@@ -96,6 +128,11 @@ public record ProdutoResponse(
                 produto.getAtualizadoEm(),
                 temImagem,
                 sazonal,
-                eventoIds);
+                eventoIds,
+                produto.getCaracteristica(),
+                produto.getAlturaCm(),
+                produto.getToxicidade(),
+                necessidadeLuz,
+                cores);
     }
 }

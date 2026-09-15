@@ -1,6 +1,8 @@
 package com.floricultura.api.web;
 
 import com.floricultura.api.config.OpenApiConfig;
+import com.floricultura.api.service.AlturaSemPorteException;
+import com.floricultura.api.service.AtributoDoProdutoInvalidoException;
 import com.floricultura.api.service.EventoInexistenteException;
 import com.floricultura.api.service.ProdutoNaoEncontradoException;
 import com.floricultura.api.service.ProdutoService;
@@ -8,16 +10,19 @@ import com.floricultura.api.web.dto.AtualizarProdutoRequest;
 import com.floricultura.api.web.dto.CriarProdutoRequest;
 import com.floricultura.api.web.dto.PaginaResponse;
 import com.floricultura.api.web.dto.ParametroPaginacaoInvalidoException;
+import com.floricultura.api.web.dto.ProdutoFiltro;
 import com.floricultura.api.web.dto.ProdutoRelacionamentosResponse;
 import com.floricultura.api.web.dto.ProdutoResponse;
 import com.floricultura.api.web.error.ErrorCode;
 import com.floricultura.api.web.response.ApiError;
 import com.floricultura.api.web.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.math.BigDecimal;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -77,16 +82,57 @@ public class ProdutoController {
      * CA-2/CA-3/CA-4: lista produtos paginados (default {@code pagina=0}, {@code tamanho=20}),
      * ordenados por {@code nome ASC}, com filtro opcional {@code nome} ({@code ILIKE '%nome%'}).
      * {@code tamanho} fora de {@code 1..100} ou {@code pagina < 0} → 400 VALIDATION_ERROR.
+     *
+     * <p><b>M6 (SPEC-M6 §3.6, CA-17..CA-23):</b> filtros server-side — atalho {@code estoque}, faixa
+     * {@code precoMin}/{@code precoMax} (inclusiva), {@code semPreco}, os repetiveis
+     * {@code caracteristica}/{@code toxicidade} e os multivalorados por juncao {@code corIds}/
+     * {@code luz}/{@code eventoIds} (OU interno; <b>E</b> entre dimensoes — P4) — e ordenacao
+     * {@code ordenarPor} ({@code nome}|{@code estoque}|{@code preco}) / {@code direcao}
+     * ({@code asc}|{@code desc}), com <b>{@code NULLS LAST} nas duas direcoes</b> e desempate
+     * {@code id ASC}. Valor fora do contrato → 400 com o {@code field} correspondente; ja
+     * {@code corIds}/{@code eventoIds} inexistentes apenas nao casam (CA-17/CA-18).
      */
-    @Operation(summary = "Lista produtos paginados (pagina/tamanho/nome), ordenados por nome ASC")
+    @Operation(summary = "Lista produtos paginados com filtros (nome, estoque=SEM_ESTOQUE|BAIXO|"
+            + "COM_ESTOQUE, precoMin/precoMax inclusivos, semPreco, e os repetiveis caracteristica, "
+            + "toxicidade, corIds, luz e eventoIds — OU dentro da mesma dimensao, E entre dimensoes "
+            + "diferentes) e ordenacao (ordenarPor=nome|estoque|preco, direcao=asc|desc; produto sem "
+            + "preco vai para o fim nas duas direcoes, desempate por id)")
     @GetMapping
     public ApiResponse<PaginaResponse<ProdutoResponse>> listar(
             @RequestParam(required = false) Integer pagina,
             @RequestParam(required = false) Integer tamanho,
             @RequestParam(required = false) String nome,
+            @Parameter(description = "Atalhos (NAO exclusivos): SEM_ESTOQUE (atual = 0) | BAIXO "
+                    + "(atual <= minimo, inclui o zero) | COM_ESTOQUE (atual > 0)")
+            @RequestParam(required = false) String estoque,
+            @Parameter(description = "Piso inclusivo do preco (>= 0)")
+            @RequestParam(required = false) BigDecimal precoMin,
+            @Parameter(description = "Teto inclusivo do preco (>= 0); precoMin > precoMax → 400")
+            @RequestParam(required = false) BigDecimal precoMax,
+            @Parameter(description = "true = so produtos sem preco definido; nao combina com "
+                    + "precoMin/precoMax (→ 400)")
+            @RequestParam(required = false) Boolean semPreco,
+            @Parameter(description = "Repetivel (OU interno): MUDA | JOVEM | ADULTA")
+            @RequestParam(required = false) List<String> caracteristica,
+            @Parameter(description = "Repetivel (OU interno): TOXICA | NAO_TOXICA")
+            @RequestParam(required = false) List<String> toxicidade,
+            @Parameter(description = "Repetivel (OU interno): ids do catalogo de cores; id "
+                    + "inexistente NAO e erro, apenas nao casa")
+            @RequestParam(required = false) List<Long> corIds,
+            @Parameter(description = "Repetivel (OU interno): SOL_PLENO | MEIA_SOMBRA | SOMBRA")
+            @RequestParam(required = false) List<String> luz,
+            @Parameter(description = "Repetivel (OU interno): ids de evento; id inexistente apenas "
+                    + "nao casa")
+            @RequestParam(required = false) List<Long> eventoIds,
+            @Parameter(description = "nome | estoque | preco (default nome)")
+            @RequestParam(required = false) String ordenarPor,
+            @Parameter(description = "asc | desc (default asc)")
+            @RequestParam(required = false) String direcao,
             HttpServletRequest http) {
+        ProdutoFiltro filtro = ProdutoFiltro.de(nome, estoque, precoMin, precoMax, semPreco,
+                caracteristica, toxicidade, ordenarPor, direcao, corIds, luz, eventoIds);
         return ApiResponse.ok(
-                produtoService.listar(pagina, tamanho, nome), http.getRequestURI());
+                produtoService.listar(pagina, tamanho, filtro), http.getRequestURI());
     }
 
     /** CA-5/CA-15: detalha produto por id (com {@code estoqueBaixo}); inexistente → 404. */
@@ -114,7 +160,11 @@ public class ProdutoController {
      * (AD-SQ-30). Payload invalido (enum fora do conjunto, {@code nome} vazio, {@code estoqueMinimo}/
      * {@code preco} negativo) → 400 VALIDATION_ERROR com {@code details}. USER → 403 (SecurityConfig).
      */
-    @Operation(summary = "Cria produto (ADMIN) → 201 com estoqueAtual=0")
+    @Operation(summary = "Cria produto (ADMIN) → 201 com estoqueAtual=0; aceita os atributos botanicos "
+            + "opcionais caracteristica (MUDA|JOVEM|ADULTA), alturaCm (1..10000 cm inteiros, exige "
+            + "porte JOVEM/ADULTA), toxicidade (TOXICA|NAO_TOXICA; ausente = nao informado) e os "
+            + "multivalorados necessidadeLuz (SOL_PLENO|MEIA_SOMBRA|SOMBRA) e corIds (ids do catalogo "
+            + "de cores; inexistente → 400 antes de qualquer escrita)")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ProdutoResponse> criar(
@@ -127,7 +177,9 @@ public class ProdutoController {
      * <b>inalterado</b> (AD-SQ-30). Payload invalido → 400; inexistente → 404 (handler local); USER →
      * 403 (SecurityConfig).
      */
-    @Operation(summary = "Atualiza produto (ADMIN) → 200; nunca toca estoqueAtual (404 se inexistente)")
+    @Operation(summary = "Atualiza produto (ADMIN) → 200; nunca toca estoqueAtual (404 se inexistente). "
+            + "Os atributos botanicos escalares sao substituidos por inteiro: valor grava, null limpa. "
+            + "Ja necessidadeLuz e corIds sao replace-set como eventoIds: null nao altera, [] limpa")
     @PutMapping("/{id}")
     public ApiResponse<ProdutoResponse> atualizar(
             @PathVariable Long id,
@@ -169,10 +221,38 @@ public class ProdutoController {
                 .body(ApiResponse.fail(error, http.getRequestURI()));
     }
 
+    /**
+     * 400 VALIDATION_ERROR com {@code field:"alturaCm"}: altura informada sem porte {@code JOVEM/ADULTA}
+     * no POST/PUT (M6/R13, CA-10). Sem a validacao de servico a violacao cairia no CHECK do banco e
+     * viraria <b>409</b> generico, sem {@code field} (§12 #15a/AD-SQ-119 — medido por mutacao).
+     */
+    @ExceptionHandler(AlturaSemPorteException.class)
+    public ResponseEntity<ApiResponse<Object>> handleAlturaSemPorte(
+            AlturaSemPorteException ex, HttpServletRequest http) {
+        ApiError error = new ApiError(
+                ErrorCode.VALIDATION_ERROR.name(), ex.getMessage(), ex.getDetails());
+        return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.status())
+                .body(ApiResponse.fail(error, http.getRequestURI()));
+    }
+
     /** 400 VALIDATION_ERROR: {@code eventoIds} com id inexistente no POST/PUT (M4/CA-11). */
     @ExceptionHandler(EventoInexistenteException.class)
     public ResponseEntity<ApiResponse<Object>> handleEventoInexistente(
             EventoInexistenteException ex, HttpServletRequest http) {
+        ApiError error = new ApiError(
+                ErrorCode.VALIDATION_ERROR.name(), ex.getMessage(), ex.getDetails());
+        return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.status())
+                .body(ApiResponse.fail(error, http.getRequestURI()));
+    }
+
+    /**
+     * 400 com {@code field:"corIds"} / {@code "necessidadeLuz"}: atributo multivalorado invalido,
+     * barrado no servico ANTES de escrever (M6/R10, CA-11/CA-12) — e nao o 409 do CHECK, que viria sem
+     * {@code field} (AD-SQ-119).
+     */
+    @ExceptionHandler(AtributoDoProdutoInvalidoException.class)
+    public ResponseEntity<ApiResponse<Object>> handleAtributoInvalido(
+            AtributoDoProdutoInvalidoException ex, HttpServletRequest http) {
         ApiError error = new ApiError(
                 ErrorCode.VALIDATION_ERROR.name(), ex.getMessage(), ex.getDetails());
         return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.status())

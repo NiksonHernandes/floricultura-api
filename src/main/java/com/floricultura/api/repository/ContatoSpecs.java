@@ -9,7 +9,6 @@ import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import org.springframework.data.jpa.domain.Specification;
 
 /**
@@ -37,14 +36,16 @@ public final class ContatoSpecs {
     /**
      * Monta o predicado do filtro ({@code nome} ILIKE + tri-estados de telefone/e-mail, combinados com
      * <b>E</b>) e fixa a ordenacao do §3.7 ({@code NULLS LAST} + desempate {@code nome ASC, id ASC}).
+     *
+     * <p>O {@code ILIKE} do nome delega ao {@link FiltroTexto} — <b>mesmo</b> helper de
+     * {@code ProdutoSpecs}, com {@code %}/{@code _} escapados: buscar "50%" nao pode significar coisas
+     * diferentes em {@code /clientes} e em {@code /produtos}.
      */
     public static <T> Specification<T> de(ContatoFiltro filtro) {
         return (root, query, cb) -> {
             List<Predicate> predicados = new ArrayList<>();
             if (filtro.nome() != null) {
-                predicados.add(cb.like(
-                        cb.lower(root.get("nome")),
-                        "%" + filtro.nome().toLowerCase(Locale.ROOT) + "%"));
+                predicados.add(FiltroTexto.contem(cb, root.get("nome"), filtro.nome()));
             }
             if (filtro.comTelefone() != null) {
                 predicados.add(preenchido(cb, root.get("telefone"), filtro.comTelefone()));

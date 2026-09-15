@@ -78,22 +78,10 @@ public class EventoService {
         }
         Pageable pageable = PaginacaoParams.paraPageable(pagina, tamanho, ORDENACAO_VITRINE);
         Page<Produto> page = produtoRepository.buscarPorEvento(id, pageable);
-        return PaginaResponse.de(page, EventoService::paraVitrine);
-    }
-
-    /**
-     * Variante de lista da vitrine: reusa {@link ProdutoResponse#de} (computa {@code estoqueBaixo}/
-     * {@code temImagem}, mantem {@code eventoIds=null}, nao materializa {@code bytea}) e <b>fixa</b>
-     * {@code sazonal=true} (PA#2/§4.1 — todo item e vinculado ao evento; o {@code @Formula} nao e
-     * confiavel sob query nativa, entao nao o lemos).
-     */
-    private static ProdutoResponse paraVitrine(Produto p) {
-        ProdutoResponse base = ProdutoResponse.de(p);
-        return new ProdutoResponse(
-                base.id(), base.nome(), base.descricao(), base.unidadeMedida(),
-                base.estoqueMinimo(), base.estoqueAtual(), base.preco(), base.imagemUrl(),
-                base.estoqueBaixo(), base.ativo(), base.criadoEm(), base.atualizadoEm(),
-                base.temImagem(), true, null);
+        // A variante de vitrine (sazonal=true fixo, eventoIds=null, sem bytea) mora no proprio
+        // ProdutoResponse desde o M6 — reconstruir o record posicionalmente aqui quebrava a cada
+        // componente novo do contrato de produto (§12 #4).
+        return PaginaResponse.de(page, ProdutoResponse::deVitrine);
     }
 
     /** Detalha um evento por id (CA-5). Inexistente → {@link EventoNaoEncontradoException} (404). */
