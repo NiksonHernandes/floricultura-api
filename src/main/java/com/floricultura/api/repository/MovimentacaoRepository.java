@@ -80,6 +80,18 @@ public interface MovimentacaoRepository extends JpaRepository<MovimentacaoEstoqu
             Pageable pageable);
 
     /**
+     * "Esta linha ja foi estornada?" (M7/T-M7-02, CA-12 — SPEC-M7 §3.4-d). Servida pelo indice unico
+     * <b>parcial</b> {@code ux_mov_estorno} da V13.
+     *
+     * <p><b>O que ela e e o que ela NAO e:</b> e a porta da frente do 409 (resposta honesta no caso
+     * sequencial — o operador clicou duas vezes). <b>Nao</b> e exclusao mutua: em {@code READ
+     * COMMITTED} duas transacoes concorrentes podem passar por aqui antes de qualquer commit. Quem
+     * garante "cada lancamento e estornado no maximo UMA vez" e o proprio indice unico, cuja violacao
+     * o controller traduz para o mesmo 409 (SPEC-M7 §3.1-b/§4 #10).
+     */
+    boolean existsByEstornaMovimentacaoId(Long estornaMovimentacaoId);
+
+    /**
      * Le o {@code criado_em} (do {@code DEFAULT now()} do banco) de uma linha recem-inserida, na mesma
      * transacao da movimentacao (T-M2-4). A coluna e {@code insertable=false}, entao a entidade em
      * memoria fica com {@code criadoEm=null} apos o INSERT; esta <b>projecao escalar</b> executa um

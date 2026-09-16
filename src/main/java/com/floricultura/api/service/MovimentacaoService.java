@@ -140,6 +140,114 @@ public class MovimentacaoService {
     }
 
     /**
+     * <b>Estorno</b> de um lancamento do ledger (M7/T-M7-02, CA-9..CA-14 — SPEC-M7 §3.4/AD-SQ-156).
+     * Nao desfaz nada: <b>insere uma linha nova</b> com o tipo <b>invertido</b>, a mesma quantidade e
+     * os <b>mesmos valores</b>, apontando para a corrigida por {@code estorna_movimentacao_id}. A
+     * original permanece visivel para sempre — e o ponto da decisao D-A do dono: o extrato mostra
+     * <b>as duas</b>, como num livro contabil.
+     *
+     * <p><b>Ordem (deliberada, igual a de {@link #movimentar}):</b> as recusas de negocio (404 e os
+     * quatro 409) rodam <b>antes</b> do lock pessimista, no mesmo lugar e estilo de
+     * {@link #resolverContraparte}/{@link #resolverValores} — requisicao que vai ser negada nao toma
+     * {@code SELECT ... FOR UPDATE} na linha do produto (nao entra na fila de contencao) e nada e
+     * escrito. So a checagem de <b>estoque</b> fica sob o lock, porque e a unica que depende do
+     * {@code estoque_atual}: estornar uma ENTRADA cuja mercadoria ja saiu devolve
+     * {@code 400 "Estoque insuficiente (X em estoque)."} e nao grava nada (§4 #6 — a correcao, ai, e
+     * um AJUSTE).
+     *
+     * <p><b>Concorrencia (§4 #10):</b> a checagem {@code existsByEstornaMovimentacaoId} e a porta da
+     * frente, <b>nao</b> uma primitiva de exclusao mutua — em {@code READ COMMITTED} duas transacoes
+     * podem passar por ela antes de qualquer commit. Quem garante "no maximo UMA vez" e o indice unico
+     * parcial {@code ux_mov_estorno} da V13; a violacao resultante e traduzida pelo controller para o
+     * <b>mesmo</b> 409 desta classe, entao o usuario nunca ve erro de constraint.
+     *
+     * <p><b>Contraparte fica NULL</b> (§3.4-b, armadilha #8): como o tipo inverte, copiar
+     * fornecedor/cliente violaria {@code ck_mov_fornecedor_tipo}/{@code ck_mov_cliente_tipo} da V10 —
+     * e relaxar esses CHECKs seria afrouxar um invariante do M5 por conveniencia. O vinculo vive na
+     * linha original, que o ponteiro referencia. Os valores sao <b>copiados, nao recalculados</b>: e o
+     * que faz a soma com sinal do par fechar em <b>exatamente</b> zero (CA-10).
+     *
+     * @param movimentacaoId id da linha a estornar
+     * @param motivo         justificativa obrigatoria (3..255, validada no DTO — PA#2)
+     * @param usuarioId      autor do <b>estorno</b> (do principal autenticado, nunca do payload — §9)
+     * @param usuarioNome    snapshot do nome do autor do estorno (nunca o autor da linha original)
+     */
+    @Transactional
+    public MovimentacaoResponse estornar(
+            Long movimentacaoId, String motivo, Long usuarioId, String usuarioNome) {
+        MovimentacaoEstoque original = movimentacaoRepository.findById(movimentacaoId)
+                .orElseThrow(EstornoInvalidoException::naoEncontrada);
+        if (movimentacaoRepository.existsByEstornaMovimentacaoId(movimentacaoId)) {
+            throw EstornoInvalidoException.jaEstornada();
+        }
+        if (original.getEstornaMovimentacaoId() != null) {
+            throw EstornoInvalidoException.deEstorno();
+        }
+        if (AJUSTE.equals(original.getTipo())) {
+            throw EstornoInvalidoException.deAjuste();
+        }
+        if (original.getProdutoId() == null) {
+            throw EstornoInvalidoException.produtoExcluido();
+        }
+
+        // A partir daqui, lock pessimista: a checagem de estoque le o estoque_atual travado.
+        Produto produto = produtoRepository.findByIdForUpdate(original.getProdutoId())
+                .orElseThrow(EstornoInvalidoException::produtoExcluido);
+
+        String tipoInvertido = inverter(original.getTipo());
+        BigDecimal quantidade = original.getQuantidade();
+        BigDecimal resultante =
+                calcularEstoqueResultante(tipoInvertido, produto.getEstoqueAtual(), quantidade);
+
+        produto.setEstoqueAtual(resultante);
+        produto.setAtualizadoEm(Instant.now());
+        produtoRepository.save(produto);
+
+        // Valores COPIADOS da original + o ponteiro: e a linha nova que diz o que ela estorna.
+        ValoresMovimentacao valores = new ValoresMovimentacao(
+                original.getValorUnitario(),
+                original.getDescontoTipo(),
+                original.getDescontoValor(),
+                original.getTotalBruto(),
+                original.getTotalFinal(),
+                original.getId());
+
+        MovimentacaoEstoque estorno = MovimentacaoFactory.nova(
+                produto.getId(),
+                produto.getNome(),
+                tipoInvertido,
+                quantidade,
+                resultante,
+                motivo,
+                usuarioId,
+                usuarioNome,
+                null,
+                null,
+                null,
+                null,
+                valores);
+        estorno = movimentacaoRepository.saveAndFlush(estorno);
+
+        Instant criadoEm = movimentacaoRepository.findCriadoEmById(estorno.getId());
+        return MovimentacaoResponse.de(estorno, criadoEm);
+    }
+
+    /**
+     * Inverte o sentido do lancamento (§3.4-a). O {@code default} e <b>inalcancavel</b> — {@code
+     * AJUSTE} ja foi recusado com 409 antes do lock —, e existe para que um futuro tipo novo falhe
+     * ALTO em vez de gravar silenciosamente uma linha que nao estorna coisa nenhuma.
+     */
+    private String inverter(String tipo) {
+        if (ENTRADA.equals(tipo)) {
+            return SAIDA;
+        }
+        if (SAIDA.equals(tipo)) {
+            return ENTRADA;
+        }
+        throw new IllegalStateException("Tipo nao estornavel: " + tipo);
+    }
+
+    /**
      * Aplica a semantica do tipo (AD-SQ-30) e devolve o estoque resultante, <b>sem</b> tocar o banco.
      * {@code ENTRADA} soma; {@code SAIDA} subtrai (bloqueia se maior que o estoque); {@code AJUSTE}
      * define a quantidade-alvo absoluta ({@code 0} = zerar, valido). {@code ENTRADA}/{@code SAIDA} com
