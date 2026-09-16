@@ -1,5 +1,6 @@
 package com.floricultura.api.web;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -7,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.floricultura.api.service.JwtService;
 import com.floricultura.api.web.response.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Base64;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -122,7 +124,16 @@ class AuthSecurityTest {
     @Test
     void tokenAdulterado_rotaAutenticada_devolve401() throws Exception {
         String token = jwtService.gerarToken(userId);
-        String adulterado = token.substring(0, token.length() - 2) + "AA"; // assinatura invalida
+        int corte = token.lastIndexOf('.') + 1; // 1o caractere da ASSINATURA
+        char original = token.charAt(corte);
+        String adulterado = token.substring(0, corte)
+                + (original == 'A' ? 'B' : 'A') // troca deterministica
+                + token.substring(corte + 1);
+        // Guarda: o 1o caractere da assinatura carrega 6 bits SIGNIFICATIVOS, entao os bytes
+        // decodificados MUDAM de fato. (No ULTIMO caractere isso nao vale: 2 bits sao padding e
+        // some na decodificacao - era o que tornava o caso instavel ~1/1024.)
+        assertThat(Base64.getUrlDecoder().decode(adulterado.substring(corte)))
+                .isNotEqualTo(Base64.getUrlDecoder().decode(token.substring(corte)));
         mockMvc.perform(get("/api/v1/_probe").header(HttpHeaders.AUTHORIZATION, bearer(adulterado)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
