@@ -41,6 +41,11 @@ public final class MovimentacaoFactory {
      * @param fornecedorNome       snapshot do nome do fornecedor (resolvido pelo servico; {@code null} se ausente)
      * @param clienteId            id do cliente da contraparte (V10/AD-SQ-64; so SAIDA; {@code null} se ausente)
      * @param clienteNome          snapshot do nome do cliente (resolvido pelo servico; {@code null} se ausente)
+     * @param valores              bloco financeiro da V13 (SPEC-M7 §3.1/§3.10) — ja calculado e
+     *                             normalizado pelo {@code CalculoFinanceiro};
+     *                             {@link ValoresMovimentacao#vazio()} no lancamento sem dinheiro (P6).
+     *                             E <b>um</b> parametro de proposito: 6 posicoes a mais nesta
+     *                             assinatura de 12 seriam armadilha permanente (§12 #7)
      * @return entidade transiente pronta para persistir
      */
     public static MovimentacaoEstoque nova(
@@ -55,7 +60,8 @@ public final class MovimentacaoFactory {
             Long fornecedorId,
             String fornecedorNome,
             Long clienteId,
-            String clienteNome) {
+            String clienteNome,
+            ValoresMovimentacao valores) {
         MovimentacaoEstoque mov = new MovimentacaoEstoque();
         mov.setProdutoId(produtoId);
         mov.setProdutoNome(produtoNome);
@@ -69,6 +75,12 @@ public final class MovimentacaoFactory {
         mov.setFornecedorNome(fornecedorNome);
         mov.setClienteId(clienteId);
         mov.setClienteNome(clienteNome);
+        mov.setValorUnitario(valores.valorUnitario());
+        mov.setDescontoTipo(valores.descontoTipo());
+        mov.setDescontoValor(valores.descontoValor());
+        mov.setTotalBruto(valores.totalBruto());
+        mov.setTotalFinal(valores.totalFinal());
+        mov.setEstornaMovimentacaoId(valores.estornaMovimentacaoId());
         return mov;
     }
 }

@@ -3,6 +3,7 @@ package com.floricultura.api.service;
 import com.floricultura.api.domain.MovimentacaoEstoque;
 import com.floricultura.api.domain.MovimentacaoFactory;
 import com.floricultura.api.domain.Produto;
+import com.floricultura.api.domain.ValoresMovimentacao;
 import com.floricultura.api.repository.ClienteRepository;
 import com.floricultura.api.repository.FornecedorRepository;
 import com.floricultura.api.repository.MovimentacaoRepository;
@@ -121,7 +122,8 @@ public class MovimentacaoService {
                 contraparte.fornecedorId(),
                 contraparte.fornecedorNome(),
                 contraparte.clienteId(),
-                contraparte.clienteNome());
+                contraparte.clienteNome(),
+                ValoresMovimentacao.vazio());
         mov = movimentacaoRepository.saveAndFlush(mov);
 
         // criado_em vem do DEFAULT now() do banco (coluna insertable=false) — projecao escalar le o

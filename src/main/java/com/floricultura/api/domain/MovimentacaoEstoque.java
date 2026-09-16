@@ -78,6 +78,24 @@ public class MovimentacaoEstoque {
     @Column(name = "cliente_nome", length = 150)
     private String clienteNome;
 
+    @Column(name = "valor_unitario", precision = 14, scale = 2)
+    private BigDecimal valorUnitario;
+
+    @Column(name = "desconto_tipo", length = 12)
+    private String descontoTipo;
+
+    @Column(name = "desconto_valor", precision = 14, scale = 2)
+    private BigDecimal descontoValor;
+
+    @Column(name = "total_bruto", precision = 14, scale = 2)
+    private BigDecimal totalBruto;
+
+    @Column(name = "total_final", precision = 14, scale = 2)
+    private BigDecimal totalFinal;
+
+    @Column(name = "estorna_movimentacao_id")
+    private Long estornaMovimentacaoId;
+
     @Column(name = "criado_em", nullable = false, insertable = false, updatable = false)
     private Instant criadoEm;
 
@@ -187,6 +205,54 @@ public class MovimentacaoEstoque {
 
     public void setClienteNome(String clienteNome) {
         this.clienteNome = clienteNome;
+    }
+
+    public BigDecimal getValorUnitario() {
+        return valorUnitario;
+    }
+
+    public void setValorUnitario(BigDecimal valorUnitario) {
+        this.valorUnitario = valorUnitario;
+    }
+
+    public String getDescontoTipo() {
+        return descontoTipo;
+    }
+
+    public void setDescontoTipo(String descontoTipo) {
+        this.descontoTipo = descontoTipo;
+    }
+
+    public BigDecimal getDescontoValor() {
+        return descontoValor;
+    }
+
+    public void setDescontoValor(BigDecimal descontoValor) {
+        this.descontoValor = descontoValor;
+    }
+
+    public BigDecimal getTotalBruto() {
+        return totalBruto;
+    }
+
+    public void setTotalBruto(BigDecimal totalBruto) {
+        this.totalBruto = totalBruto;
+    }
+
+    public BigDecimal getTotalFinal() {
+        return totalFinal;
+    }
+
+    public void setTotalFinal(BigDecimal totalFinal) {
+        this.totalFinal = totalFinal;
+    }
+
+    public Long getEstornaMovimentacaoId() {
+        return estornaMovimentacaoId;
+    }
+
+    public void setEstornaMovimentacaoId(Long estornaMovimentacaoId) {
+        this.estornaMovimentacaoId = estornaMovimentacaoId;
     }
 
     public Instant getCriadoEm() {
