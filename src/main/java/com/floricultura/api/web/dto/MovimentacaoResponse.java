@@ -30,6 +30,17 @@ import java.time.Instant;
  *                             hard delete do cadastro — o {@code clienteNome} sobrevive)
  * @param clienteNome          snapshot do nome do cliente ({@code null} sem contraparte)
  * @param criadoEm             instante de criacao (UTC ISO-8601), do {@code DEFAULT now()} do banco
+ *
+ * <p><b>Valores (V13/SPEC-M7 §3.3) — 6 campos ADITIVOS, no fim do record</b> de proposito: nenhum
+ * campo existente muda de nome, tipo ou <b>posicao</b>. Todos {@code null} quando nao se aplicam
+ * (lancamento sem dinheiro, P6), e {@code jsonPath(...).doesNotExist()} continua valendo para eles.
+ *
+ * @param valorUnitario         preco unitario congelado no lancamento ({@code null} = sem dinheiro)
+ * @param descontoTipo          {@code PERCENTUAL}/{@code VALOR} ({@code null} = sem desconto)
+ * @param descontoValor         percentual {@code 0..100} ou reais, conforme o tipo
+ * @param totalBruto            {@code quantidade x valorUnitario}, calculado pelo servidor
+ * @param totalFinal            {@code totalBruto - desconto efetivo} (o desconto em R$ e derivavel)
+ * @param estornaMovimentacaoId id da linha que esta linha estorna ({@code null} = lancamento comum)
  */
 public record MovimentacaoResponse(
         Long id,
@@ -45,7 +56,13 @@ public record MovimentacaoResponse(
         String fornecedorNome,
         Long clienteId,
         String clienteNome,
-        Instant criadoEm) {
+        Instant criadoEm,
+        BigDecimal valorUnitario,
+        String descontoTipo,
+        BigDecimal descontoValor,
+        BigDecimal totalBruto,
+        BigDecimal totalFinal,
+        Long estornaMovimentacaoId) {
 
     /**
      * Mapeia uma linha do ledger para o response (SPEC-M2 §3.2) — usa o {@code criadoEm} ja carregado
@@ -75,6 +92,12 @@ public record MovimentacaoResponse(
                 mov.getFornecedorNome(),
                 mov.getClienteId(),
                 mov.getClienteNome(),
-                criadoEm);
+                criadoEm,
+                mov.getValorUnitario(),
+                mov.getDescontoTipo(),
+                mov.getDescontoValor(),
+                mov.getTotalBruto(),
+                mov.getTotalFinal(),
+                mov.getEstornaMovimentacaoId());
     }
 }

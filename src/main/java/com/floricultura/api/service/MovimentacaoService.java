@@ -51,6 +51,9 @@ public class MovimentacaoService {
     /** Ordenacao vazia: a lista global (§3.5) fixa {@code criado_em DESC} no proprio SQL nativo. */
     private static final Sort SEM_ORDENACAO = Sort.unsorted();
 
+    /** Teto do desconto percentual (§3.2-c V7). */
+    private static final BigDecimal CEM = new BigDecimal("100");
+
     private final ProdutoRepository produtoRepository;
     private final MovimentacaoRepository movimentacaoRepository;
     private final FornecedorRepository fornecedorRepository;
@@ -98,6 +101,9 @@ public class MovimentacaoService {
         // snapshots de nome ANTES de qualquer escrita — 400 com field, nada persiste.
         Contraparte contraparte = resolverContraparte(req);
 
+        // Valores (V13/SPEC-M7 §3.2): mesma politica — valida e calcula ANTES do lock/escrita.
+        ValoresMovimentacao valores = resolverValores(req);
+
         Produto produto = produtoRepository.findByIdForUpdate(produtoId)
                 .orElseThrow(ProdutoNaoEncontradoException::new);
 
@@ -123,7 +129,7 @@ public class MovimentacaoService {
                 contraparte.fornecedorNome(),
                 contraparte.clienteId(),
                 contraparte.clienteNome(),
-                ValoresMovimentacao.vazio());
+                valores);
         mov = movimentacaoRepository.saveAndFlush(mov);
 
         // criado_em vem do DEFAULT now() do banco (coluna insertable=false) — projecao escalar le o
@@ -193,6 +199,58 @@ public class MovimentacaoService {
         String filtro = (q == null || q.isBlank()) ? null : q.trim();
         Page<MovimentacaoEstoque> page = movimentacaoRepository.buscarGlobal(filtro, pageable);
         return PaginaResponse.de(page, MovimentacaoResponse::de);
+    }
+
+    /**
+     * Valida os valores financeiros (SPEC-M7 §3.2-c: V2/V3/V4/V7/V8 — as cross-field; V1/V5/V6 ja
+     * cairam no Bean Validation do DTO) e devolve o bloco ja calculado e normalizado. Roda <b>antes</b>
+     * do lock e de qualquer escrita: 400 com {@code field}, nada persiste.
+     *
+     * <p><b>As faixas sao julgadas sobre o valor NORMALIZADO</b> (§3.2-b1): e o numero que sera
+     * gravado. Julgar o cru deixaria {@code PERCENTUAL = 100.004} ser rejeitado por V7 enquanto a
+     * coluna guardaria {@code 100.00} — regra que depende de qual numero se olha ninguem reproduz.
+     */
+    private ValoresMovimentacao resolverValores(MovimentacaoRequest req) {
+        BigDecimal valorUnitario = CalculoFinanceiro.normalizar(req.valorUnitario());
+        String descontoTipo = req.descontoTipo();
+        BigDecimal descontoValor = CalculoFinanceiro.normalizar(req.descontoValor());
+
+        // V2 (PA#1): AJUSTE e alvo absoluto de quantidade — nao ha o que multiplicar por um unitario.
+        if (AJUSTE.equals(req.tipo())
+                && (valorUnitario != null || descontoTipo != null || descontoValor != null)) {
+            throw new ValoresInvalidosException(
+                    "valorUnitario", "AJUSTE não aceita valores financeiros.");
+        }
+        // V3: desconto sem base de calculo nao existe.
+        if (descontoTipo != null && valorUnitario == null) {
+            throw new ValoresInvalidosException("descontoTipo", "Desconto exige valor unitário.");
+        }
+        // V4: o par tipo/valor anda junto — o field aponta o AUSENTE.
+        if (descontoTipo == null && descontoValor != null) {
+            throw new ValoresInvalidosException(
+                    "descontoTipo", "Informe o tipo e o valor do desconto.");
+        }
+        if (descontoTipo != null && descontoValor == null) {
+            throw new ValoresInvalidosException(
+                    "descontoValor", "Informe o tipo e o valor do desconto.");
+        }
+        // V7: percentual acima de 100 tornaria o total negativo.
+        if (CalculoFinanceiro.DESCONTO_PERCENTUAL.equals(descontoTipo)
+                && descontoValor.compareTo(CEM) > 0) {
+            throw new ValoresInvalidosException(
+                    "descontoValor", "Desconto percentual deve estar entre 0 e 100.");
+        }
+
+        ValoresMovimentacao valores = CalculoFinanceiro.calcular(
+                req.quantidade(), req.valorUnitario(), descontoTipo, req.descontoValor());
+
+        // V8: desconto em reais maior que o bruto — idem (o CHECK ck_mov_total_final e a rede).
+        if (CalculoFinanceiro.DESCONTO_VALOR.equals(descontoTipo)
+                && descontoValor.compareTo(valores.totalBruto()) > 0) {
+            throw new ValoresInvalidosException(
+                    "descontoValor", "Desconto não pode exceder o total bruto.");
+        }
+        return valores;
     }
 
     /**

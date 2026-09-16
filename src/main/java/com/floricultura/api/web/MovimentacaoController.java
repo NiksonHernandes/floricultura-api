@@ -7,6 +7,7 @@ import com.floricultura.api.service.EstoqueInsuficienteException;
 import com.floricultura.api.service.MovimentacaoService;
 import com.floricultura.api.service.ProdutoNaoEncontradoException;
 import com.floricultura.api.service.QuantidadeInvalidaException;
+import com.floricultura.api.service.ValoresInvalidosException;
 import com.floricultura.api.web.dto.MovimentacaoRequest;
 import com.floricultura.api.web.dto.MovimentacaoResponse;
 import com.floricultura.api.web.dto.PaginaResponse;
@@ -137,6 +138,17 @@ public class MovimentacaoController {
     @ExceptionHandler(ContraparteInvalidaException.class)
     public ResponseEntity<ApiResponse<Object>> handleContraparteInvalida(
             ContraparteInvalidaException ex, HttpServletRequest http) {
+        return respostaValidacao(ex.getMessage(), ex.getDetails(), http);
+    }
+
+    /**
+     * 400 VALIDATION_ERROR: valores financeiros invalidos (V13/SPEC-M7 §3.2-c, V2/V3/V4/V7/V8) —
+     * {@code details} no campo ofensor ({@code valorUnitario}/{@code descontoTipo}/{@code
+     * descontoValor}), <b>nada persiste</b> (a validacao roda antes do lock).
+     */
+    @ExceptionHandler(ValoresInvalidosException.class)
+    public ResponseEntity<ApiResponse<Object>> handleValoresInvalidos(
+            ValoresInvalidosException ex, HttpServletRequest http) {
         return respostaValidacao(ex.getMessage(), ex.getDetails(), http);
     }
 
