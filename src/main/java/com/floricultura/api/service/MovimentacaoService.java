@@ -8,6 +8,7 @@ import com.floricultura.api.repository.ClienteRepository;
 import com.floricultura.api.repository.FornecedorRepository;
 import com.floricultura.api.repository.MovimentacaoRepository;
 import com.floricultura.api.repository.ProdutoRepository;
+import com.floricultura.api.web.dto.FiltroMovimentacao;
 import com.floricultura.api.web.dto.MovimentacaoRequest;
 import com.floricultura.api.web.dto.MovimentacaoResponse;
 import com.floricultura.api.web.dto.PaginaResponse;
@@ -191,13 +192,20 @@ public class MovimentacaoService {
      * (indices GIN trigram da V8); {@code q} vazio/em branco = sem filtro. Ordem {@code criado_em DESC}
      * fixa no SQL nativo — o {@link Pageable} entra sem {@code Sort} (paginacao obrigatoria; range
      * invalido → {@code 400} pelo helper §3.3). Legivel por USER+ADMIN (RBAC no catch-all, sem matcher).
+     *
+     * <p><b>M7/T-M7-03 (§3.5):</b> o {@code q} e os filtros novos chegam juntos no
+     * {@link FiltroMovimentacao}, que ja os validou e converteu (datas → {@link java.time.Instant} em
+     * {@code America/Sao_Paulo}). Um record no lugar de mais seis parametros posicionais: a assinatura
+     * de nove posicoes e exatamente a armadilha que o §12 #7 manda evitar. Filtro todo nulo ⇒ resposta
+     * <b>identica</b> a de hoje (CA-16) — este metodo nao tem ramo condicional, quem decide e o SQL.
      */
     @Transactional(readOnly = true)
     public PaginaResponse<MovimentacaoResponse> buscarGlobal(
-            Integer pagina, Integer tamanho, String q) {
+            Integer pagina, Integer tamanho, FiltroMovimentacao filtro) {
         Pageable pageable = PaginacaoParams.paraPageable(pagina, tamanho, SEM_ORDENACAO);
-        String filtro = (q == null || q.isBlank()) ? null : q.trim();
-        Page<MovimentacaoEstoque> page = movimentacaoRepository.buscarGlobal(filtro, pageable);
+        Page<MovimentacaoEstoque> page = movimentacaoRepository.buscarGlobal(
+                filtro.q(), filtro.de(), filtro.ate(), filtro.tipo(),
+                filtro.produtoId(), filtro.clienteId(), filtro.fornecedorId(), pageable);
         return PaginaResponse.de(page, MovimentacaoResponse::de);
     }
 
