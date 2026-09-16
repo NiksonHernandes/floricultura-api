@@ -38,6 +38,14 @@ import org.springframework.web.cors.CorsConfigurationSource;
  * {@code /api/v1/clientes/**} e {@code /api/v1/fornecedores/**} segue autenticado (USER+ADMIN);
  * {@code POST}/{@code PUT}/{@code DELETE} desses cadastros (dado pessoal, LGPD) exigem {@code ROLE_ADMIN}.
  *
+ * <p><b>RBAC do ESTORNO (M7/T-M7-02, §3.9/AD-SQ-158):</b> {@code POST /api/v1/movimentacoes/**} exige
+ * {@code ROLE_ADMIN}. Sem este matcher o estorno cairia em {@code anyRequest().authenticated()} e
+ * <b>um USER conseguiria estornar</b> — o unico matcher de POST do dominio que existia,
+ * {@code /api/v1/produtos/**}, nao alcanca esta rota. O escopo por <b>metodo</b> e obrigatorio, nao
+ * zelo: {@code /api/v1/movimentacoes/**} sem {@link HttpMethod#POST} casaria tambem o {@code GET} da
+ * lista global (o {@code /**} do {@code PathPatternParser} casa zero segmentos), tornando-a ADMIN-only
+ * e quebrando o contrato do M4 (USER le o ledger). Nenhum matcher existente muda ou e reordenado.
+ *
  * <p>Mantem do M0: CSRF off, CORS on (o {@code CorsFilter} entra ANTES da autorizacao, entao o
  * preflight {@code OPTIONS} e respondido sem exigir auth — §12/CA-M0-5), sessao STATELESS,
  * {@code httpBasic}/{@code formLogin} off, {@code PasswordEncoder} (BCrypt). Os handlers de erro
@@ -79,6 +87,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/v1/fornecedores/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/fornecedores/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/cores/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/movimentacoes/**")
+                                .hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/v1/cores/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/cores/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
