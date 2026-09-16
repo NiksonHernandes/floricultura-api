@@ -46,6 +46,13 @@ import org.springframework.web.cors.CorsConfigurationSource;
  * lista global (o {@code /**} do {@code PathPatternParser} casa zero segmentos), tornando-a ADMIN-only
  * e quebrando o contrato do M4 (USER le o ledger). Nenhum matcher existente muda ou e reordenado.
  *
+ * <p><b>RBAC do RELATORIO (M7/T-M7-04, §3.7-e/§3.9/AD-SQ-158):</b>
+ * {@code /api/v1/relatorios/**} exige {@code ROLE_ADMIN} — e o <b>primeiro GET restrito por papel do
+ * projeto</b> (todos os demais GET caem em {@code anyRequest().authenticated()}). Aqui o matcher e
+ * <b>sem {@link HttpMethod}</b> de proposito, ao contrario do estorno: a area inteira e ADMIN-only
+ * (agregacao e export, T-M7-06), e o relatorio carrega nome de cliente/fornecedor — dado pessoal
+ * (§9, LGPD). Sem esta linha, um USER leria o relatorio (403 viraria 200).
+ *
  * <p>Mantem do M0: CSRF off, CORS on (o {@code CorsFilter} entra ANTES da autorizacao, entao o
  * preflight {@code OPTIONS} e respondido sem exigir auth — §12/CA-M0-5), sessao STATELESS,
  * {@code httpBasic}/{@code formLogin} off, {@code PasswordEncoder} (BCrypt). Os handlers de erro
@@ -91,6 +98,7 @@ public class SecurityConfig {
                                 .hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/v1/cores/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/cores/**").hasRole("ADMIN")
+                        .requestMatchers("/api/v1/relatorios/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(authenticationEntryPoint)
