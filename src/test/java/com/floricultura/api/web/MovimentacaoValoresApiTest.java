@@ -282,4 +282,33 @@ class MovimentacaoValoresApiTest {
         assertEquals(new BigDecimal("20.02"), conferencia.get("total_bruto"));
         assertEquals(conferencia.get("bruto_recalculado"), conferencia.get("total_bruto"));
     }
+
+    /**
+     * <b>O e2e que REPROVA</b> (§3.2-b2, CA-53). O caso acima ({@code 10.005}) documenta a regra mas nao
+     * a prova: ele fica verde tambem quando o numero passa por {@code double} em algum ponto do
+     * caminho, porque o erro de representacao empurra {@code 10.005} para CIMA do empate. Com
+     * {@code 8.165} o erro empurra para BAIXO ({@code 8.16499999999999914...}) e a linha gravada sai com
+     * {@code 8.16}/{@code 16.32}.
+     *
+     * <p>Alem de repetir a aritmetica do unitario, este caso tem um papel que so existe aqui: ele
+     * atravessa o caminho inteiro — texto JSON, desserializacao do Jackson, servico, JDBC,
+     * {@code NUMERIC(14,2)} — e por isso e a prova de que o numero chega ao {@code BigDecimal}
+     * <b>sem passar por {@code double}</b> em lugar nenhum. Se passasse, o banco guardaria 8,16.
+     */
+    @Test
+    void ca53ValorDiscriminanteChegaAoBancoSemPassarPorDouble() throws Exception {
+        postar("{\"tipo\":\"SAIDA\",\"quantidade\":2,\"valorUnitario\":8.165}")
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.valorUnitario").value(8.17))
+                .andExpect(jsonPath("$.data.totalBruto").value(16.34))
+                .andExpect(jsonPath("$.data.totalFinal").value(16.34));
+
+        Map<String, Object> conferencia = jdbc.queryForMap(
+                "SELECT valor_unitario, total_bruto, "
+                        + "round(quantidade * valor_unitario, 2) AS bruto_recalculado "
+                        + "FROM movimentacao_estoque ORDER BY id DESC LIMIT 1");
+        assertEquals(new BigDecimal("8.17"), conferencia.get("valor_unitario"));
+        assertEquals(new BigDecimal("16.34"), conferencia.get("total_bruto"));
+        assertEquals(conferencia.get("bruto_recalculado"), conferencia.get("total_bruto"));
+    }
 }

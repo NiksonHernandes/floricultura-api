@@ -160,4 +160,29 @@ class CalculoFinanceiroTest {
         assertThat(v.totalBruto()).isEqualTo(bd("30.00"));
         assertThat(v.totalFinal()).isEqualTo(bd("20.00"));
     }
+
+    /**
+     * <b>O caso que REPROVA</b> (§3.2-b2, CA-53). Os dois casos acima <b>documentam</b> a normalizacao,
+     * mas nao a provam: {@code 10.005} e {@code 33.335} sao aprovados tambem pelas implementacoes
+     * ingenuas, porque o erro de representacao binaria cai do lado de CIMA do empate
+     * ({@code new BigDecimal(10.005d) = 10.00500000000000078...} ⇒ sobe para {@code 10.01} por
+     * acidente). Em {@code 8.165} o erro cai do lado de BAIXO
+     * ({@code new BigDecimal(8.165d) = 8.16499999999999914...}) e a implementacao errada grava
+     * {@code 8.16} — um centavo a menos, numa linha imutavel.
+     *
+     * <p>Por isso o numero aqui e {@code 8.165} e nao outro: trocar {@code valor.setScale(2, HALF_UP)}
+     * por {@code new BigDecimal(valor.doubleValue()).setScale(2, HALF_UP)} deixa este caso VERMELHO
+     * ({@code expected 8.17, was 8.16}) enquanto todos os demais continuam verdes.
+     */
+    @Test
+    void normalizacaoDiscriminanteOitoCentoESessentaECinco() {
+        ValoresMovimentacao v = calcular("2", "8.165", null, null);
+
+        assertThat(v.valorUnitario()).isEqualTo(bd("8.17"));
+        assertThat(v.totalBruto()).isEqualTo(bd("16.34"));
+        assertThat(v.totalFinal()).isEqualTo(bd("16.34"));
+        assertThat(v.totalBruto())
+                .as("a linha fecha consigo mesma: bruto = round(quantidade x unitario gravado, 2)")
+                .isEqualTo(CalculoFinanceiro.totalBruto(bd("2"), v.valorUnitario()));
+    }
 }
