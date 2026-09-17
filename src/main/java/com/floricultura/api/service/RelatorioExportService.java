@@ -28,6 +28,8 @@ import com.lowagie.text.pdf.PdfWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetEncoder;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -82,6 +84,12 @@ public class RelatorioExportService {
     /** Locale do documento — numero em pt-BR ({@code 1.234,56}), independente do locale do host. */
     private static final Locale BR = Locale.of("pt", "BR");
 
+    /** Codificacao real das fontes padrao do PDF (Cp1252) — o que cabe no papel sem fonte embutida. */
+    private static final Charset WINANSI = Charset.forName("windows-1252");
+
+    /** O que aparece no lugar do caractere que a fonte do PDF nao escreve (AD-SQ-184). */
+    private static final char MARCADOR_ILEGIVEL = '?';
+
     private static final Font TITULO = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 14);
 
     private static final Font CABECALHO = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8);
@@ -92,6 +100,24 @@ public class RelatorioExportService {
     static final List<String> COLUNAS = List.of(
             "Data/hora", "Produto", "Tipo", "Qtd", "Saldo", "Unitário", "Total", "Contraparte",
             "Autor");
+
+    /**
+     * <b>Decisao do dono (2026-09-17): o {@code motivo} entra no detalhado</b> — e o unico texto que
+     * explica um AJUSTE ou um estorno num papel que vai para o contador (fecha com a PA#2, que tornou
+     * o motivo do estorno obrigatorio justamente para esse texto existir).
+     *
+     * <p><b>Cada meio na forma que lhe cabe, porque a largura foi MEDIDA</b> (A4 deitado = 786 pt
+     * uteis, ~3,85 pt por caractere a 8 pt):
+     * <ul>
+     *   <li><b>XLSX = coluna propria.</b> Planilha nao tem largura finita e o dono precisa
+     *       filtrar/ordenar por ela.</li>
+     *   <li><b>PDF = linha de apoio</b> abaixo do lancamento (o mesmo desenho da tela, §3.11-b:
+     *       "Produto com o motivo embaixo"). Uma 10a coluna encolheria <b>Produto de 157,2 pt para
+     *       131,0 pt (-17 %)</b> e quebraria um motivo de 255 caracteres em <b>~8 linhas</b>; na linha
+     *       de apoio ele ocupa a largura inteira e cabe em <b>~2</b>, sem encolher nenhuma coluna.</li>
+     * </ul>
+     */
+    static final String COLUNA_MOTIVO = "Motivo";
 
     private final RelatorioService relatorioService;
     private final MovimentacaoRepository movimentacaoRepository;
@@ -235,6 +261,8 @@ public class RelatorioExportService {
             ws.value(linha, coluna, COLUNAS.get(coluna));
             ws.style(linha, coluna).bold().set();
         }
+        ws.value(linha, COLUNAS.size(), COLUNA_MOTIVO);
+        ws.style(linha, COLUNAS.size()).bold().set();
         int primeiraLinhaDeDados = linha + 1;
         for (MovimentacaoEstoque m : detalhado) {
             linha++;
@@ -254,6 +282,9 @@ public class RelatorioExportService {
             ws.value(linha, 7, contraparte(m));
             if (m.getUsuarioNome() != null) {
                 ws.value(linha, 8, m.getUsuarioNome());
+            }
+            if (m.getMotivo() != null) {
+                ws.value(linha, 9, m.getMotivo());
             }
         }
         if (linha >= primeiraLinhaDeDados) {
@@ -360,19 +391,79 @@ public class RelatorioExportService {
             celula(tabela, contraparte(m), CORPO, Element.ALIGN_LEFT);
             celula(tabela, m.getUsuarioNome() == null ? "" : m.getUsuarioNome(), CORPO,
                     Element.ALIGN_LEFT);
+            motivoPdf(tabela, m.getMotivo());
         }
         return tabela;
     }
 
+    /**
+     * Linha de apoio com o {@code motivo}, abaixo do lancamento e ocupando a largura inteira — so
+     * quando ha motivo (lancamento sem motivo nao ganha linha em branco). Ver {@link #COLUNA_MOTIVO}
+     * para a medicao que descartou a 10a coluna.
+     */
+    private static void motivoPdf(PdfPTable tabela, String motivo) {
+        if (motivo == null || motivo.isBlank()) {
+            return;
+        }
+        PdfPCell apoio = new PdfPCell(new Phrase(legivelNoPdf("Motivo: " + motivo), CORPO));
+        apoio.setColspan(COLUNAS.size());
+        apoio.setHorizontalAlignment(Element.ALIGN_LEFT);
+        apoio.setPadding(3);
+        tabela.addCell(apoio);
+    }
+
     private static Paragraph paragrafo(String texto, Font fonte) {
-        return new Paragraph(texto, fonte);
+        return new Paragraph(legivelNoPdf(texto), fonte);
     }
 
     private static void celula(PdfPTable tabela, String texto, Font fonte, int alinhamento) {
-        PdfPCell celula = new PdfPCell(new Phrase(texto, fonte));
+        PdfPCell celula = new PdfPCell(new Phrase(legivelNoPdf(texto), fonte));
         celula.setHorizontalAlignment(alinhamento);
         celula.setPadding(3);
         tabela.addCell(celula);
+    }
+
+    /**
+     * <b>AD-SQ-184 (decisao do dono): caractere que a fonte do PDF nao sabe escrever vira marcador
+     * VISIVEL, nunca silencio.</b>
+     *
+     * <p>As fontes padrao do PDF escrevem em <b>Cp1252/WinAnsi</b>, e o OpenPDF <b>descarta sem erro
+     * nenhum</b> o que nao cabe ali. Medido: {@code Rosa Białystok} (cultivar real) saia
+     * {@code Rosa Biaystok} — <b>um nome de produto perdendo uma letra, sem nada vermelho em lugar
+     * nenhum</b>. Todo o portugues passa intacto ({@code Ortênsia}, {@code Açaí}, {@code °},
+     * {@code —}), entao o marcador so aparece quando ha mesmo perda.
+     *
+     * <p><b>Por que marcador e nao fonte embutida:</b> uma TTF Unicode custaria centenas de KB contra
+     * o orcamento MEDIDO do §3.14 (3 766 034 B). As duas saidas nao se excluem — no dia em que o
+     * catalogo tiver cultivar estrangeira de verdade, paga-se a fonte; ate la, o papel <b>confessa</b>
+     * a perda. Mesma razao da AD-SQ-176: redigir em silencio e o pior modo de falhar.
+     *
+     * <p>O XLSX <b>nao</b> passa por aqui: o XML dele e UTF-8 e escreve {@code ł} sem perder nada.
+     */
+    static String legivelNoPdf(String texto) {
+        if (texto == null) {
+            return "";
+        }
+        if (soAscii(texto)) {
+            return texto;
+        }
+        // Encoder e mutavel/nao thread-safe: um por chamada, e so quando ha caractere fora do ASCII.
+        CharsetEncoder winAnsi = WINANSI.newEncoder();
+        StringBuilder saida = new StringBuilder(texto.length());
+        for (int i = 0; i < texto.length(); i++) {
+            char caractere = texto.charAt(i);
+            saida.append(winAnsi.canEncode(caractere) ? caractere : MARCADOR_ILEGIVEL);
+        }
+        return saida.toString();
+    }
+
+    private static boolean soAscii(String texto) {
+        for (int i = 0; i < texto.length(); i++) {
+            if (texto.charAt(i) > 0x7F) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
