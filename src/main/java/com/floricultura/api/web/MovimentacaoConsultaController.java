@@ -10,6 +10,7 @@ import com.floricultura.api.web.dto.FiltroMovimentacao;
 import com.floricultura.api.web.dto.MovimentacaoResponse;
 import com.floricultura.api.web.dto.PaginaResponse;
 import com.floricultura.api.web.dto.ParametroPaginacaoInvalidoException;
+import com.floricultura.api.web.error.DiagnosticoIntegridade;
 import com.floricultura.api.web.error.ErrorCode;
 import com.floricultura.api.web.response.ApiError;
 import com.floricultura.api.web.response.ApiResponse;
@@ -197,7 +198,10 @@ public class MovimentacaoConsultaController {
             DataIntegrityViolationException ex, HttpServletRequest http) {
         Throwable causa = ex.getMostSpecificCause();
         String texto = causa.getMessage() == null ? "" : causa.getMessage();
-        log.warn("Violacao de integridade em {}: {}", http.getRequestURI(), texto);
+        // LGPD (AD-SQ-170): `texto` decide a rota em memoria, mas NAO vai ao log — em violacao de
+        // CHECK o PostgreSQL anexa a linha inteira, e movimentacao carrega cliente_nome/fornecedor_nome.
+        log.warn("Violacao de integridade em {}: {}",
+                http.getRequestURI(), DiagnosticoIntegridade.de(ex));
         if (texto.contains(UX_MOV_ESTORNO)) {
             return falha(ErrorCode.CONFLICT,
                     EstornoInvalidoException.jaEstornada().getMessage(), List.of(), http);

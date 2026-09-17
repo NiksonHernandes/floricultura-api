@@ -73,11 +73,19 @@ public class GlobalExceptionHandler {
         return build(ErrorCode.NOT_FOUND, ErrorCode.NOT_FOUND.defaultMessage(), List.of(), request);
     }
 
-    /** Violacao de unicidade/estado (ex.: e-mail duplicado) -> 409. */
+    /**
+     * Violacao de unicidade/estado (ex.: e-mail duplicado) -> 409.
+     *
+     * <p><b>LGPD (AD-SQ-170):</b> o log leva o {@link DiagnosticoIntegridade} (constraint +
+     * {@code SQLState} + classe da causa), <b>nunca</b> {@code ex.getMessage()} — a mensagem do
+     * PostgreSQL traz o {@code Detail:} com a linha que falhou, e por aqui passam {@code cliente} e
+     * {@code fornecedor}. A resposta HTTP nao muda.
+     */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<Object>> handleConflict(
             DataIntegrityViolationException ex, HttpServletRequest request) {
-        log.warn("Conflito de integridade em {}: {}", request.getRequestURI(), ex.getMessage());
+        log.warn("Conflito de integridade em {}: {}",
+                request.getRequestURI(), DiagnosticoIntegridade.de(ex));
         return build(ErrorCode.CONFLICT, ErrorCode.CONFLICT.defaultMessage(), List.of(), request);
     }
 

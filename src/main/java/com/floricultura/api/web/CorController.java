@@ -9,6 +9,7 @@ import com.floricultura.api.web.dto.CorRequest;
 import com.floricultura.api.web.dto.CorResponse;
 import com.floricultura.api.web.dto.PaginaResponse;
 import com.floricultura.api.web.dto.ParametroPaginacaoInvalidoException;
+import com.floricultura.api.web.error.DiagnosticoIntegridade;
 import com.floricultura.api.web.error.ErrorCode;
 import com.floricultura.api.web.response.ApiError;
 import com.floricultura.api.web.response.ApiResponse;
@@ -180,7 +181,10 @@ public class CorController {
             DataIntegrityViolationException ex, HttpServletRequest http) {
         Throwable causa = ex.getMostSpecificCause();
         String texto = causa.getMessage() == null ? "" : causa.getMessage();
-        log.warn("Violacao de integridade em {}: {}", http.getRequestURI(), texto);
+        // LGPD (AD-SQ-170): `texto` decide a rota em memoria, mas NAO vai ao log — a mensagem do
+        // PostgreSQL anexa `Detail: Failing row contains (…)`. Ao log vai so o metadado de esquema.
+        log.warn("Violacao de integridade em {}: {}",
+                http.getRequestURI(), DiagnosticoIntegridade.de(ex));
         if (texto.contains("ck_cor_nome_canonico")) {
             return falha(ErrorCode.VALIDATION_ERROR, NOME_INVALIDO,
                     List.of(new FieldErrorItem("nome", NOME_INVALIDO)), http);
