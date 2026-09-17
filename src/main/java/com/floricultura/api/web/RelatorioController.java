@@ -1,8 +1,11 @@
 package com.floricultura.api.web;
 
 import com.floricultura.api.config.OpenApiConfig;
+import com.floricultura.api.service.RelatorioExportService;
+import com.floricultura.api.service.RelatorioExportService.Arquivo;
 import com.floricultura.api.service.RelatorioService;
 import com.floricultura.api.web.dto.FiltroRelatorio;
+import com.floricultura.api.web.dto.FormatoExport;
 import com.floricultura.api.web.dto.ParametroPaginacaoInvalidoException;
 import com.floricultura.api.web.dto.RelatorioResponse;
 import com.floricultura.api.web.error.ErrorCode;
@@ -14,6 +17,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDate;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -45,9 +50,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class RelatorioController {
 
     private final RelatorioService relatorioService;
+    private final RelatorioExportService relatorioExportService;
 
-    public RelatorioController(RelatorioService relatorioService) {
+    public RelatorioController(
+            RelatorioService relatorioService, RelatorioExportService relatorioExportService) {
         this.relatorioService = relatorioService;
+        this.relatorioExportService = relatorioExportService;
     }
 
     /**
@@ -73,6 +81,50 @@ public class RelatorioController {
         FiltroRelatorio filtro = FiltroRelatorio.de(
                 de, ate, granularidade, tipo, produtoId, clienteId, fornecedorId);
         return ApiResponse.ok(relatorioService.gerar(filtro), http.getRequestURI());
+    }
+
+    /**
+     * CA-26..CA-30: o <b>mesmo</b> recorte do §3.7 baixado como arquivo — binario <b>fora do
+     * envelope</b> (precedente do endpoint de imagem, AD-SQ-37).
+     *
+     * <p><b>A validacao e a MESMA, nao uma copia</b> (CA-29/CA-54): esta rota chama a mesma
+     * {@link FiltroRelatorio#de} da rota de agregacao, entao herda a precedencia da AD-SQ-170
+     * (presenca de {@code de}/{@code ate} → janela → teto de 366 dias → {@code granularidade}) e as
+     * mensagens palavra por palavra. O {@code formato} e validado <b>depois</b> do periodo, porque a
+     * CA-54 exige que {@code /export} sem {@code de} responda {@code field=de}: sem periodo nao ha o
+     * que exportar, e apontar o erro menos importante custa duas viagens ao operador.
+     *
+     * <p><b>{@code Cache-Control: no-store}</b> (CA-28): o arquivo carrega nome de cliente/fornecedor
+     * — dado pessoal (§9/LGPD) que nao pode ficar em cache de proxy ou de navegador. Nada e gravado em
+     * disco no servidor.
+     *
+     * <p><b>O {@code produces} binario nao impede o 400 em JSON</b> — o
+     * {@code ExceptionHandlerExceptionResolver} limpa os tipos produziveis antes do handler local.
+     * Nao e suposicao: o {@code GET /produtos/{id}/imagem} ja e assim, e o
+     * {@code ProdutoImagemProcessamentoTest} prova o 400 {@code VALIDATION_ERROR} naquela rota.
+     */
+    @Operation(summary = "Exporta o relatorio de movimentacoes como arquivo (ADMIN): ?formato=XLSX, "
+            + "binario fora do envelope, attachment + Cache-Control no-store")
+    @GetMapping(value = "/movimentacoes/export", produces = FormatoExport.CONTENT_TYPE_XLSX)
+    public ResponseEntity<byte[]> exportar(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate de,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate ate,
+            @RequestParam(required = false) String granularidade,
+            @RequestParam(required = false) String tipo,
+            @RequestParam(required = false) Long produtoId,
+            @RequestParam(required = false) Long clienteId,
+            @RequestParam(required = false) Long fornecedorId,
+            @RequestParam(required = false) String formato) {
+        FiltroRelatorio filtro = FiltroRelatorio.de(
+                de, ate, granularidade, tipo, produtoId, clienteId, fornecedorId);
+        Arquivo arquivo = relatorioExportService.gerar(filtro, FormatoExport.fromWire(formato));
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(arquivo.contentType()))
+                .contentLength(arquivo.conteudo().length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + arquivo.nome() + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(arquivo.conteudo());
     }
 
     // ---- Handler local (nao toca o GlobalExceptionHandler do M0 — §8) -------------------------
