@@ -200,4 +200,57 @@ public interface MovimentacaoRepository extends JpaRepository<MovimentacaoEstoqu
             @Param("produtoId") Long produtoId,
             @Param("clienteId") Long clienteId,
             @Param("fornecedorId") Long fornecedorId);
+
+    // ---- Export (SPEC-M7 §3.8, T-M7-06) -------------------------------------------------------
+
+    /**
+     * Quantas linhas o <b>detalhado do export</b> vai materializar — o numero que o teto de 5 000
+     * (§3.8) compara <b>antes</b> de montar o documento. Conta o conjunto que de fato ocupa memoria,
+     * que e a razao do teto existir (§9, host grati; §12 #11): sem ele, um intervalo de um ano derruba
+     * o back e o sintoma (502/cold start) nem parece bug de relatorio.
+     *
+     * <p>Usa o <b>mesmo</b> {@link #RECORTE_RELATORIO} + {@link #SEM_PAR_ESTORNADO} da agregacao, entao
+     * vale <b>{@code contarDoRecorte + contarExcluidosDoRecorte = total de linhas do recorte}</b> —
+     * a mesma identidade auditavel do §10 #10f, agora tambem do lado do export.
+     */
+    @Query(value = "SELECT count(*) " + RECORTE_RELATORIO + "AND (" + SEM_PAR_ESTORNADO + ")",
+            nativeQuery = true)
+    long contarDoRecorte(
+            @Param("de") Instant de,
+            @Param("ate") Instant ate,
+            @Param("tipo") String tipo,
+            @Param("produtoId") Long produtoId,
+            @Param("clienteId") Long clienteId,
+            @Param("fornecedorId") Long fornecedorId);
+
+    /**
+     * Linhas do <b>detalhado</b> do PDF/XLSX (§3.8), na mesma ordem da tela ({@code criado_em DESC},
+     * §3.11-b) para que o papel mostre o que o operador acabou de ver.
+     *
+     * <p><b>O par estornado fica de FORA — decisao do dono (2026-09-17), pedida entre tres opcoes.</b>
+     * O predicado e literalmente o mesmo da agregacao ({@link #SEM_PAR_ESTORNADO} sobre o
+     * {@link #RECORTE_RELATORIO}), e nao uma segunda escrita "equivalente": assim <b>somar a coluna
+     * Total com a calculadora fecha com o resumo impresso na mesma folha</b> — num papel que vai para o
+     * contador, um detalhado que nao fecha com o proprio resumo e pior que um detalhado mais curto. A
+     * omissao vai <b>declarada</b> no documento, pela linha de {@code lancamentosEstornadosExcluidos}
+     * (PA#3: nunca silenciosa).
+     *
+     * <p>⚠️ <b>O {@code NOT EXISTS} continua IRRESTRITO</b> (§12 #22): recorta-lo pelo periodo faria a
+     * linha cujo estorno caiu em outro mes <b>voltar</b> a tabela — mutacao M-F do plano desta task, e
+     * a mesma armadilha central que a T-M7-04 documentou.
+     *
+     * <p>Sem {@code LIMIT} de proposito: quem limita e o teto do {@link #contarDoRecorte}, verificado
+     * antes desta chamada. Um {@code LIMIT} aqui truncaria o relatorio <b>em silencio</b>, que e o
+     * oposto do contrato.
+     */
+    @Query(value = "SELECT * " + RECORTE_RELATORIO + "AND (" + SEM_PAR_ESTORNADO + ") "
+            + "ORDER BY m.criado_em DESC",
+            nativeQuery = true)
+    List<MovimentacaoEstoque> listarDoRecorte(
+            @Param("de") Instant de,
+            @Param("ate") Instant ate,
+            @Param("tipo") String tipo,
+            @Param("produtoId") Long produtoId,
+            @Param("clienteId") Long clienteId,
+            @Param("fornecedorId") Long fornecedorId);
 }
