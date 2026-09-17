@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 
 /**
- * Nivel 1 da T-M7-10 (AD-SQ-170 / LGPD): o redator {@link DiagnosticoIntegridade} sobre mensagens no
+ * Nivel 1 da T-M7-10 (AD-SQ-176 / LGPD): o redator {@link DiagnosticoIntegridade} sobre mensagens no
  * formato REAL do PostgreSQL. As strings abaixo foram escritas no mesmo formato que o driver produz
  * ({@code ERROR: … constraint "…"} + linha {@code Detail:}) com dados ficticios.
  *

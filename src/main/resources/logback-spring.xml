@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Config de log do app (T-M7-10 / AD-SQ-176 / LGPD).
+
+  POR QUE ESTE ARQUIVO EXISTE: registrar um `conversionRule` e a UNICA forma de trocar o renderizador
+  de stacktrace de TODOS os loggers do processo, inclusive os de dependencia. O conversor esta em
+  com.floricultura.api.config.ThrowableSemMensagemDeBancoConverter e o app o seleciona via
+  `logging.exception-conversion-word: "%exLgpd"` no application.yml (Spring Boot exporta essa
+  propriedade como ${LOG_EXCEPTION_CONVERSION_WORD}, que o defaults.xml abaixo consome).
+
+  O RESTO E O PADRAO DO SPRING BOOT, NAO UMA REESCRITA: os dois <include> sao os recursos que o
+  proprio Boot 4.1.1 publica (defaults.xml traz %clr/%correlationId/%esb/%wEx, os padroes de console
+  e arquivo e os niveis de ruido; console-appender.xml e o mesmo ConsoleAppender que o Boot monta
+  programaticamente). `logging.level.*`, `logging.pattern.*` e os profiles continuam valendo — eles
+  sao aplicados pelo LoggingApplicationListener depois desta configuracao.
+
+  LIMITE DECLARADO: com config XML propria, o Boot deixa de criar o appender de ARQUIVO sozinho.
+  O projeto nunca usou `logging.file.name`/`logging.file.path` (zero ocorrencias no repo e no host);
+  se um dia usar, inclua aqui `org/springframework/boot/logging/logback/file-appender.xml` e adicione
+  <appender-ref ref="FILE"/> ao <root>.
+-->
+<configuration>
+	<conversionRule conversionWord="exLgpd"
+			class="com.floricultura.api.config.ThrowableSemMensagemDeBancoConverter"/>
+
+	<include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+	<include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+	<root level="INFO">
+		<appender-ref ref="CONSOLE"/>
+	</root>
+</configuration>

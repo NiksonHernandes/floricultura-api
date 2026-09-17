@@ -76,7 +76,7 @@ public class GlobalExceptionHandler {
     /**
      * Violacao de unicidade/estado (ex.: e-mail duplicado) -> 409.
      *
-     * <p><b>LGPD (AD-SQ-170):</b> o log leva o {@link DiagnosticoIntegridade} (constraint +
+     * <p><b>LGPD (AD-SQ-176):</b> o log leva o {@link DiagnosticoIntegridade} (constraint +
      * {@code SQLState} + classe da causa), <b>nunca</b> {@code ex.getMessage()} — a mensagem do
      * PostgreSQL traz o {@code Detail:} com a linha que falhou, e por aqui passam {@code cliente} e
      * {@code fornecedor}. A resposta HTTP nao muda.
@@ -105,7 +105,16 @@ public class GlobalExceptionHandler {
                 List.of(new FieldErrorItem(ex.getName(), "Valor invalido.")), request);
     }
 
-    /** Qualquer excecao nao mapeada -> 500 generico; detalhe apenas no log. */
+    /**
+     * Qualquer excecao nao mapeada -> 500 generico; detalhe apenas no log.
+     *
+     * <p><b>LGPD (AD-SQ-176):</b> aqui o {@code ex} VAI inteiro para o log de proposito — no 500 o
+     * operador precisa do <i>onde</i>, e o <i>onde</i> sao os frames. Quem tira o <i>que</i> e o
+     * renderizador {@code %exLgpd} ({@code logback-spring.xml} +
+     * {@link com.floricultura.api.config.ThrowableSemMensagemDeBancoConverter}): se houver causa de
+     * banco na cadeia, some a mensagem do servidor e ficam classe, {@code Caused by:} e frames.
+     * Redigir aqui, na mao, nao resolveria — o mesmo stacktrace sai por loggers de dependencia.
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Object>> handleUnexpected(
             Exception ex, HttpServletRequest request) {

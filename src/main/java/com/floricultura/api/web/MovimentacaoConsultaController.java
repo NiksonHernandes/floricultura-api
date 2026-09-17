@@ -198,7 +198,7 @@ public class MovimentacaoConsultaController {
             DataIntegrityViolationException ex, HttpServletRequest http) {
         Throwable causa = ex.getMostSpecificCause();
         String texto = causa.getMessage() == null ? "" : causa.getMessage();
-        // LGPD (AD-SQ-170): `texto` decide a rota em memoria, mas NAO vai ao log — em violacao de
+        // LGPD (AD-SQ-176): `texto` decide a rota em memoria, mas NAO vai ao log — em violacao de
         // CHECK o PostgreSQL anexa a linha inteira, e movimentacao carrega cliente_nome/fornecedor_nome.
         log.warn("Violacao de integridade em {}: {}",
                 http.getRequestURI(), DiagnosticoIntegridade.de(ex));

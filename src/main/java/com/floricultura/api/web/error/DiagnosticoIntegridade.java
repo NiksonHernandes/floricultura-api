@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
 
 /**
  * Resumo <b>seguro</b> de uma violacao de integridade, para ir ao log no lugar da mensagem crua do
- * driver (AD-SQ-170 / LGPD).
+ * driver (AD-SQ-176 / LGPD).
  *
  * <p><b>O problema.</b> {@code DataIntegrityViolationException#getMessage()} carrega a mensagem do
  * PostgreSQL inteira, e o PostgreSQL anexa o <b>dado que falhou</b> na linha {@code Detail:} —
@@ -61,13 +61,25 @@ public final class DiagnosticoIntegridade {
                 + " causa=" + (causa == null ? DESCONHECIDO : causa.getClass().getSimpleName());
     }
 
-    /** Nome da constraint violada, ou {@code ?} quando a mensagem nao a nomeia (ex.: NOT NULL). */
+    /**
+     * Nome da constraint violada, ou {@code ?} quando a mensagem nao a nomeia (ex.: NOT NULL).
+     *
+     * <p><b>So a primeira linha</b> (T-M7-10 / P2-01). O PostgreSQL sempre nomeia a constraint no
+     * cabecalho e sempre poe o dado que falhou nas linhas seguintes ({@code Detalhe:}/{@code
+     * Detail:}). Procurar {@code constraint "…"} na mensagem inteira abre um buraco: numa violacao
+     * NOT NULL o cabecalho <b>nao</b> cita constraint entre aspas, entao o primeiro casamento so
+     * pode vir da linha de dados — e ali {@code constraint "MARIA"} passaria pela cerca de
+     * identificador e iria para o log. Cortar em {@code '\n'} fecha isso sem custo: onde nao ha
+     * quebra de linha o comportamento e identico ao anterior, e o caso legitimo continua saindo.
+     */
     private static String constraintDe(Throwable causa) {
         String mensagem = causa == null ? null : causa.getMessage();
         if (mensagem == null) {
             return DESCONHECIDO;
         }
-        Matcher m = CONSTRAINT.matcher(mensagem);
+        int quebra = mensagem.indexOf('\n');
+        String cabecalho = quebra < 0 ? mensagem : mensagem.substring(0, quebra);
+        Matcher m = CONSTRAINT.matcher(cabecalho);
         if (!m.find()) {
             return DESCONHECIDO;
         }

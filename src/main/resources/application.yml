@@ -70,6 +70,27 @@ app:
       # automatico quando nao. O dono pode setar false no host p/ forcar JPEG SEM redeploy.
       webp-habilitado: ${APP_UPLOAD_IMAGEM_WEBP_HABILITADO:true}
 
+# LGPD (AD-SQ-176 / T-M7-10 R-10) — duas travas de log, base para TODOS os profiles.
+#
+# 1) org.hibernate.orm.jdbc.error = OFF. O Hibernate (SqlExceptionHelper#logExceptions) chama
+#    ERROR_LOG.warn(sqlException.getMessage()) com a mensagem CRUA do servidor ANTES de a excecao
+#    subir para o @ExceptionHandler — e essa mensagem traz o "Detalhe: Key (email)=(...)" do
+#    PostgreSQL. Como e WARN, passava pelo logging.level.root=INFO de prod. O MESMO incidente ja e
+#    logado pelo app em forma redigida (DiagnosticoIntegridade: constraint + SQLState + classe), nos
+#    3 pontos que tratam DataIntegrityViolationException; o duplicado so acrescentava o dado pessoal.
+#    TRADE-OFF DECLARADO: perde-se tambem a linha "HHH000247: ErrorCode/SQLState" para excecoes de
+#    banco que nao chegam a handler nenhum — nesses casos resta o stacktrace do catch-all, que o
+#    item (2) mantem util. NAO e "%msg" que o renderizador do (2) alcanca: por isso as duas travas.
+#
+# 2) exception-conversion-word = %exLgpd. Troca o renderizador de stacktrace de TODOS os loggers
+#    (ver logback-spring.xml + ThrowableSemMensagemDeBancoConverter): mantem classe e frames, omite a
+#    mensagem das causas de banco. Sem isto, log.error("...", ex) do catch-all imprime o
+#    "Caused by: org.postgresql.util.PSQLException: ERROR: ... Detalhe: ..." inteiro.
+logging:
+  level:
+    org.hibernate.orm.jdbc.error: "OFF"
+  exception-conversion-word: "%exLgpd"
+
 # Actuator: expor apenas health e info (SPEC-M0 §3.3).
 management:
   endpoints:

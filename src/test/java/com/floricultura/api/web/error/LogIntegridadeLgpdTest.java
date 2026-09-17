@@ -31,7 +31,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * Nivel 2 da T-M7-10 (AD-SQ-170 / LGPD): a excecao aqui e <b>de verdade</b> — vem de um INSERT
+ * Nivel 2 da T-M7-10 (AD-SQ-176 / LGPD): a excecao aqui e <b>de verdade</b> — vem de um INSERT
  * duplicado num PostgreSQL 16 real (Testcontainers) batendo na constraint {@code uq_usuario_email}
  * da V1, traduzida pelo Spring. O handler e o <b>bean real</b> do contexto e o appender e plugado no
  * <b>mesmo logger</b> que o {@code GlobalExceptionHandler} usa em producao
