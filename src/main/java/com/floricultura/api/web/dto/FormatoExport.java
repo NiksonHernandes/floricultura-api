@@ -24,6 +24,7 @@ import java.util.stream.Collectors;
  */
 public enum FormatoExport {
 
+    PDF("application/pdf", "pdf"),
     XLSX(FormatoExport.CONTENT_TYPE_XLSX, "xlsx");
 
     /**

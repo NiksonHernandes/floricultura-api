@@ -10,6 +10,21 @@ import com.floricultura.api.web.dto.ParametroPaginacaoInvalidoException;
 import com.floricultura.api.web.dto.RelatorioResponse;
 import com.floricultura.api.web.dto.RelatorioResponse.Totais;
 import com.floricultura.api.web.response.FieldErrorItem;
+import com.lowagie.text.Document;
+import com.lowagie.text.DocumentException;
+import com.lowagie.text.Element;
+import com.lowagie.text.Font;
+import com.lowagie.text.FontFactory;
+import com.lowagie.text.PageSize;
+import com.lowagie.text.Paragraph;
+import com.lowagie.text.Phrase;
+import com.lowagie.text.pdf.BaseFont;
+import com.lowagie.text.pdf.PdfContentByte;
+import com.lowagie.text.pdf.PdfPCell;
+import com.lowagie.text.pdf.PdfPTable;
+import com.lowagie.text.pdf.PdfPageEventHelper;
+import com.lowagie.text.pdf.PdfTemplate;
+import com.lowagie.text.pdf.PdfWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -18,6 +33,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import org.dhatim.fastexcel.Workbook;
 import org.dhatim.fastexcel.Worksheet;
 import org.springframework.context.annotation.Lazy;
@@ -62,6 +78,15 @@ public class RelatorioExportService {
     private static final DateTimeFormatter DIA = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     private static final DateTimeFormatter DIA_HORA = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+
+    /** Locale do documento — numero em pt-BR ({@code 1.234,56}), independente do locale do host. */
+    private static final Locale BR = Locale.of("pt", "BR");
+
+    private static final Font TITULO = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 14);
+
+    private static final Font CABECALHO = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8);
+
+    private static final Font CORPO = FontFactory.getFont(FontFactory.HELVETICA, 8);
 
     /** Colunas do detalhado — as mesmas da tela (§3.11-b), na mesma ordem. */
     static final List<String> COLUNAS = List.of(
@@ -118,6 +143,7 @@ public class RelatorioExportService {
                 janela.de(), janela.ate(), janela.tipo(),
                 janela.produtoId(), janela.clienteId(), janela.fornecedorId());
         byte[] conteudo = switch (formato) {
+            case PDF -> pdf(dados, filtro, detalhado);
             case XLSX -> xlsx(dados, filtro, detalhado);
         };
         return new Arquivo(conteudo, nomeArquivo(filtro, formato), formato.contentType());
@@ -184,6 +210,7 @@ public class RelatorioExportService {
         linha = totaisXlsx(ws, linha, "Ajustes", resumo.ajustes());
         ws.range(primeiraLinhaDeTotais, 2, linha - 1, 2).style().format("#,##0.000").set();
         ws.range(primeiraLinhaDeTotais, 3, linha - 1, 3).style().format("#,##0.00").set();
+        // No XLSX o XML e UTF-8: aqui o sinal de menos do contrato (U+2212) vai inteiro.
         ws.value(linha, 0, "Resultado (Saídas − Entradas)");
         ws.value(linha, 3, resumo.resultadoValor());
         ws.style(linha, 3).format("#,##0.00").bold().set();
@@ -240,7 +267,170 @@ public class RelatorioExportService {
         ws.width(8, 20);
     }
 
+    // ---- PDF (OpenPDF) ------------------------------------------------------------------------
+
+    /**
+     * Mesma informacao do XLSX, em A4 <b>deitado</b> (as 9 colunas do §3.11-b nao cabem em retrato) e
+     * com o rodape {@code Página X de Y} do §3.8.
+     *
+     * <p><b>Texto, aqui, e so apresentacao:</b> os numeros sao formatados a partir do
+     * {@link java.math.BigDecimal} que ja veio com escala fixa — nunca de um {@code double} —, entao a
+     * formatacao nao pode mudar um centavo (R6).
+     */
+    private byte[] pdf(
+            RelatorioResponse dados, FiltroRelatorio filtro, List<MovimentacaoEstoque> detalhado) {
+        ByteArrayOutputStream saida = new ByteArrayOutputStream();
+        Document doc = new Document(PageSize.A4.rotate(), 28, 28, 36, 36);
+        try {
+            PdfWriter writer = PdfWriter.getInstance(doc, saida);
+            writer.setPageEvent(new Rodape());
+            doc.open();
+            doc.add(paragrafo("Relatório de movimentações", TITULO));
+            doc.add(paragrafo(
+                    "Período: " + dados.de().format(DIA) + " a " + dados.ate().format(DIA), CORPO));
+            doc.add(paragrafo("Filtros: " + descreverFiltros(filtro, detalhado), CORPO));
+            doc.add(paragrafo(
+                    "Gerado em: " + LocalDateTime.now(clock).format(DIA_HORA), CORPO));
+            doc.add(resumoPdf(dados.resumo()));
+            doc.add(detalhadoPdf(detalhado));
+            doc.close();
+        } catch (DocumentException falhaDeMontagem) {
+            throw new IllegalStateException("Falha ao montar o PDF do relatório.", falhaDeMontagem);
+        }
+        return saida.toByteArray();
+    }
+
+    private PdfPTable resumoPdf(RelatorioResponse.Resumo resumo) {
+        PdfPTable tabela = new PdfPTable(new float[] {5, 2, 2, 2});
+        tabela.setWidthPercentage(65);
+        tabela.setSpacingBefore(14);
+        tabela.setHorizontalAlignment(Element.ALIGN_LEFT);
+        celula(tabela, "Resumo", CABECALHO, Element.ALIGN_LEFT);
+        celula(tabela, "Lançamentos", CABECALHO, Element.ALIGN_RIGHT);
+        celula(tabela, "Quantidade", CABECALHO, Element.ALIGN_RIGHT);
+        celula(tabela, "Valor (R$)", CABECALHO, Element.ALIGN_RIGHT);
+        linhaDeTotais(tabela, "Entradas", resumo.entradas());
+        linhaDeTotais(tabela, "Saídas", resumo.saidas());
+        linhaDeTotais(tabela, "Ajustes", resumo.ajustes());
+        // A formula vai ESCRITA (§3.7-a): "saldo" sem formula e adjetivo.
+        // ⚠️ HIFEN ASCII de proposito, e SO no PDF: o literal do contrato usa o sinal de menos
+        // U+2212, que NAO existe no Cp1252/WinAnsi das fontes padrao do PDF — o OpenPDF descarta o
+        // caractere em SILENCIO (medido: a primeira execucao deste teste imprimiu "Saídas  Entradas",
+        // com o sinal comido). Embutir uma TTF Unicode custaria centenas de KB no jar, contra o
+        // orcamento medido do §3.14. O XLSX e o JSON continuam com o U+2212.
+        celula(tabela, "Resultado (Saídas - Entradas)", CABECALHO, Element.ALIGN_LEFT);
+        celula(tabela, "", CORPO, Element.ALIGN_RIGHT);
+        celula(tabela, "", CORPO, Element.ALIGN_RIGHT);
+        celula(tabela, dinheiro(resumo.resultadoValor()), CABECALHO, Element.ALIGN_RIGHT);
+        // PA#3: a omissao e declarada no proprio papel, nunca silenciosa.
+        celula(tabela, "Lançamentos de pares estornados fora deste relatório", CORPO,
+                Element.ALIGN_LEFT);
+        celula(tabela, String.valueOf(resumo.lancamentosEstornadosExcluidos()), CORPO,
+                Element.ALIGN_RIGHT);
+        celula(tabela, "", CORPO, Element.ALIGN_RIGHT);
+        celula(tabela, "", CORPO, Element.ALIGN_RIGHT);
+        return tabela;
+    }
+
+    private void linhaDeTotais(PdfPTable tabela, String rotulo, Totais totais) {
+        celula(tabela, rotulo, CORPO, Element.ALIGN_LEFT);
+        celula(tabela, String.valueOf(totais.lancamentos()), CORPO, Element.ALIGN_RIGHT);
+        celula(tabela, quantidade(totais.quantidade()), CORPO, Element.ALIGN_RIGHT);
+        celula(tabela, dinheiro(totais.valor()), CORPO, Element.ALIGN_RIGHT);
+    }
+
+    private PdfPTable detalhadoPdf(List<MovimentacaoEstoque> detalhado) {
+        PdfPTable tabela = new PdfPTable(new float[] {3, 5, 2, 2, 2, 2, 2, 4, 3});
+        tabela.setWidthPercentage(100);
+        tabela.setSpacingBefore(16);
+        tabela.setHeaderRows(1);
+        for (String coluna : COLUNAS) {
+            celula(tabela, coluna, CABECALHO, Element.ALIGN_LEFT);
+        }
+        for (MovimentacaoEstoque m : detalhado) {
+            celula(tabela, DIA_HORA.format(
+                    LocalDateTime.ofInstant(m.getCriadoEm(), ClockConfig.ZONA_SAO_PAULO)),
+                    CORPO, Element.ALIGN_LEFT);
+            celula(tabela, m.getProdutoNome(), CORPO, Element.ALIGN_LEFT);
+            celula(tabela, m.getTipo(), CORPO, Element.ALIGN_LEFT);
+            celula(tabela, quantidade(m.getQuantidade()), CORPO, Element.ALIGN_RIGHT);
+            celula(tabela, quantidade(m.getQuantidadeResultante()), CORPO, Element.ALIGN_RIGHT);
+            celula(tabela, dinheiro(m.getValorUnitario()), CORPO, Element.ALIGN_RIGHT);
+            celula(tabela, dinheiro(m.getTotalFinal()), CORPO, Element.ALIGN_RIGHT);
+            celula(tabela, contraparte(m), CORPO, Element.ALIGN_LEFT);
+            celula(tabela, m.getUsuarioNome() == null ? "" : m.getUsuarioNome(), CORPO,
+                    Element.ALIGN_LEFT);
+        }
+        return tabela;
+    }
+
+    private static Paragraph paragrafo(String texto, Font fonte) {
+        return new Paragraph(texto, fonte);
+    }
+
+    private static void celula(PdfPTable tabela, String texto, Font fonte, int alinhamento) {
+        PdfPCell celula = new PdfPCell(new Phrase(texto, fonte));
+        celula.setHorizontalAlignment(alinhamento);
+        celula.setPadding(3);
+        tabela.addCell(celula);
+    }
+
+    /**
+     * Rodape {@code Página X de Y} (§3.8). O {@code Y} so existe quando o documento fecha, entao ele e
+     * reservado como {@link PdfTemplate} em cada pagina e preenchido no {@code onCloseDocument} — o
+     * caminho classico do iText/OpenPDF, e a unica forma de nao montar o documento duas vezes.
+     */
+    private static final class Rodape extends PdfPageEventHelper {
+
+        private PdfTemplate totalDePaginas;
+        private BaseFont fonte;
+
+        @Override
+        public void onOpenDocument(PdfWriter writer, Document document) {
+            totalDePaginas = writer.getDirectContent().createTemplate(36, 12);
+            try {
+                fonte = BaseFont.createFont();
+            } catch (IOException falhaDeFonte) {
+                throw new UncheckedIOException(falhaDeFonte);
+            }
+        }
+
+        @Override
+        public void onEndPage(PdfWriter writer, Document document) {
+            PdfContentByte canvas = writer.getDirectContent();
+            canvas.beginText();
+            canvas.setFontAndSize(fonte, 8);
+            canvas.setTextMatrix(document.left(), document.bottom() - 18);
+            canvas.showText("Página " + writer.getPageNumber() + " de ");
+            canvas.endText();
+            canvas.addTemplate(totalDePaginas, document.left() + 52, document.bottom() - 18);
+        }
+
+        @Override
+        public void onCloseDocument(PdfWriter writer, Document document) {
+            totalDePaginas.beginText();
+            totalDePaginas.setFontAndSize(fonte, 8);
+            totalDePaginas.setTextMatrix(0, 0);
+            totalDePaginas.showText(String.valueOf(writer.getPageNumber() - 1));
+            totalDePaginas.endText();
+        }
+    }
+
     // ---- Apoio compartilhado ------------------------------------------------------------------
+
+    /**
+     * Dinheiro em pt-BR a partir do {@link java.math.BigDecimal} — <b>sem passar por {@code double}</b>
+     * (o {@code Formatter} tem caminho exato para {@code BigDecimal}). Valor ausente (P6: lancamento
+     * sem dinheiro) vira {@code —}, que a tela ja usa e o dono distingue de {@code R$ 0,00} (§4 #4).
+     */
+    static String dinheiro(java.math.BigDecimal valor) {
+        return valor == null ? "—" : String.format(BR, "%,.2f", valor);
+    }
+
+    /** Quantidade com as 3 casas da coluna {@code NUMERIC(14,3)}. */
+    static String quantidade(java.math.BigDecimal valor) {
+        return valor == null ? "—" : String.format(BR, "%,.3f", valor);
+    }
 
     /**
      * Filtros do recorte <b>em portugues</b> (§3.8). Os nomes saem do <b>snapshot que o proprio ledger

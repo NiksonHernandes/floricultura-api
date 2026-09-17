@@ -103,9 +103,10 @@ public class RelatorioController {
      * Nao e suposicao: o {@code GET /produtos/{id}/imagem} ja e assim, e o
      * {@code ProdutoImagemProcessamentoTest} prova o 400 {@code VALIDATION_ERROR} naquela rota.
      */
-    @Operation(summary = "Exporta o relatorio de movimentacoes como arquivo (ADMIN): ?formato=XLSX, "
-            + "binario fora do envelope, attachment + Cache-Control no-store")
-    @GetMapping(value = "/movimentacoes/export", produces = FormatoExport.CONTENT_TYPE_XLSX)
+    @Operation(summary = "Exporta o relatorio de movimentacoes como arquivo (ADMIN): "
+            + "?formato=PDF|XLSX, binario fora do envelope, attachment + Cache-Control no-store")
+    @GetMapping(value = "/movimentacoes/export",
+            produces = {MediaType.APPLICATION_PDF_VALUE, FormatoExport.CONTENT_TYPE_XLSX})
     public ResponseEntity<byte[]> exportar(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate de,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate ate,
