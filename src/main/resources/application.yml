@@ -86,6 +86,16 @@ app:
 #    (ver logback-spring.xml + ThrowableSemMensagemDeBancoConverter): mantem classe e frames, omite a
 #    mensagem das causas de banco. Sem isto, log.error("...", ex) do catch-all imprime o
 #    "Caused by: org.postgresql.util.PSQLException: ERROR: ... Detalhe: ..." inteiro.
+# ⚠️ PORTA LATENTE, achada pelo QA do M7 e NAO consertada de proposito (nao ha rota que a exercite;
+#    desligar logger sem sintoma e ruido). LEIA ANTES DE LIGAR BATCHING:
+#    org.hibernate.orm.jdbc.batch (BatchImpl) escreve a mensagem CRUA do servidor no slot %m —
+#    exatamente como o SqlExceptionHelper fazia antes da trava (1) abaixo. Hoje e INALCANCAVEL porque
+#    nao existe hibernate.jdbc.batch_size configurado em profile nenhum (medido: `grep -rn batch
+#    src/main/resources/*.yml` nao devolve nada). Quem ligar batching por performance REABRE a mesma
+#    porta que a AD-SQ-176 fechou: ligue `org.hibernate.orm.jdbc.batch: "OFF"` junto, ou prove com um
+#    caso que o lote nao leva dado pessoal ao log. Medido no M7: uma violacao no LEDGER imprime
+#    "Failing row contains (..., Maria Silva Cliente, 1234.56, ...)" — nome de contraparte (V10) e
+#    dinheiro (V13) na mesma linha.
 logging:
   level:
     org.hibernate.orm.jdbc.error: "OFF"
