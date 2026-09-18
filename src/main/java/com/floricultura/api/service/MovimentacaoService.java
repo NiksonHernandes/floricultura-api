@@ -109,7 +109,10 @@ public class MovimentacaoService {
                 .orElseThrow(ProdutoNaoEncontradoException::new);
 
         BigDecimal estoqueAtual = produto.getEstoqueAtual();
-        BigDecimal quantidade = req.quantidade();
+        // Passo 0 da quantidade (decisao do dono, 2026-09-18): a MESMA normalizacao que o bloco
+        // financeiro aplica, aqui na trilha do estoque — assim a linha grava exatamente o numero que
+        // foi multiplicado, e o estoque anda pelo mesmo numero que a linha declara.
+        BigDecimal quantidade = CalculoFinanceiro.normalizarQuantidade(req.quantidade());
         BigDecimal resultante = calcularEstoqueResultante(req.tipo(), estoqueAtual, quantidade);
 
         // Escritas so acontecem apos a validacao acima (CA-11: SAIDA insuficiente nao grava nada).

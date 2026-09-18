@@ -28,6 +28,12 @@ public final class CalculoFinanceiro {
     /** Escala de moeda do projeto — casa com {@code NUMERIC(14,2)} da V13. */
     public static final int ESCALA = 2;
 
+    /**
+     * Escala de <b>quantidade</b> — casa com {@code NUMERIC(14,3)} de {@code quantidade} e
+     * {@code quantidade_resultante} (V1).
+     */
+    public static final int ESCALA_QUANTIDADE = 3;
+
     /** Arredondamento do projeto — o mesmo do PostgreSQL ao gravar {@code NUMERIC}. */
     public static final RoundingMode ARREDONDAMENTO = RoundingMode.HALF_UP;
 
@@ -43,6 +49,25 @@ public final class CalculoFinanceiro {
     /** Passo 0 (§3.2-b1): poe o numero na escala da coluna. {@code null} continua {@code null}. */
     public static BigDecimal normalizar(BigDecimal valor) {
         return valor == null ? null : valor.setScale(ESCALA, ARREDONDAMENTO);
+    }
+
+    /**
+     * Passo 0 da <b>quantidade</b> (decisao do dono, 2026-09-18) — o campo que tinha ficado de fora.
+     *
+     * <p><b>O defeito que isto fecha, medido:</b> a conta usava a quantidade <b>crua</b> enquanto a
+     * coluna {@code NUMERIC(14,3)} guardava a arredondada, entao a linha nao fechava consigo mesma —
+     * {@code 1.0005 x 1000.00} gravava {@code quantidade=1.001} com {@code total_bruto=1000.50},
+     * quando {@code round(1.001 x 1000.00, 2) = 1001.00}. Numa linha <b>imutavel</b>, quem reconferisse
+     * a multiplicacao acharia outro total e nao teria como corrigir.
+     *
+     * <p><b>Por que arredondar e nao recusar:</b> o dono escolheu entre as duas e ficou com a
+     * consistencia — "e exatamente a regra que ja aprovei para o preco unitario, so estende ao campo
+     * que ficou de fora". Um 400 para 4+ casas criaria <b>duas regras para o mesmo problema</b>.
+     */
+    public static BigDecimal normalizarQuantidade(BigDecimal quantidade) {
+        return quantidade == null
+                ? null
+                : quantidade.setScale(ESCALA_QUANTIDADE, ARREDONDAMENTO);
     }
 
     /** {@code (quantidade x valorUnitario)} na escala 2 — com o valor unitario JA normalizado. */
@@ -83,7 +108,9 @@ public final class CalculoFinanceiro {
         }
         BigDecimal unitario = normalizar(valorUnitario);
         BigDecimal desconto = normalizar(descontoValor);
-        BigDecimal bruto = totalBruto(quantidade, unitario);
+        // A quantidade entra no passo 0 pelo MESMO motivo dos outros dois: e ela multiplicada que
+        // tem de bater com a que a coluna guarda (decisao do dono, 2026-09-18).
+        BigDecimal bruto = totalBruto(normalizarQuantidade(quantidade), unitario);
         BigDecimal efetivo = descontoEfetivo(bruto, descontoTipo, desconto);
         return new ValoresMovimentacao(
                 unitario, descontoTipo, desconto, bruto, bruto.subtract(efetivo), null);
